@@ -148,6 +148,26 @@ body {
   font-weight: 600;
 }
 
+/* Landing competency library */
+.landing-competency-library {
+  margin-top: 32px;
+}
+.landing-competency-library .section-header {
+  margin-bottom: 16px;
+}
+.landing-competency-library .section-header .section-number {
+  font-size: 1.3rem;
+}
+.landing-competency-library .section-header h2 {
+  font-size: 1.2rem;
+}
+.landing-competency-library .section-header p {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+.landing-competency-library .tip-box,
+.landing-competency-library .coach-box { display: none; }
+
 /* Section preview panel on landing */
 .section-preview-panel {
   margin-top: 28px;

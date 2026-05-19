@@ -290,9 +290,11 @@ const Renderer = (() => {
 
       ${tipBox('s3Coach', 'coach')}
 
-      <h3 class="comp-lib-group-title">${T.get('roleCompetencies')}</h3>
-      <p class="comp-lib-group-desc">${T.get('roleCompetenciesDesc')}</p>
-      ${roleComps.map(renderCard).join('')}
+      ${roleComps.length > 0 ? `
+        <h3 class="comp-lib-group-title">${T.get('roleCompetencies')}</h3>
+        <p class="comp-lib-group-desc">${T.get('roleCompetenciesDesc')}</p>
+        ${roleComps.map(renderCard).join('')}
+      ` : ''}
 
       ${b5Comps.length > 0 ? `
         <h3 class="comp-lib-group-title" style="margin-top:32px">🧠 ${T.get('bigFiveCompetencies')}</h3>
@@ -669,5 +671,6 @@ const Renderer = (() => {
     renderFollowUps(data) { document.getElementById('section-followups').innerHTML = renderFollowUps(data); },
     renderScorecard(data) { document.getElementById('section-scorecard').innerHTML = renderScorecard(data); },
     renderCompetencyLibrary(data) { document.getElementById('section-competency-library').innerHTML = renderCompetencyLibrary(data); },
+    renderCompetencyLibraryHTML(data) { return renderCompetencyLibrary(data); },
   };
 })();

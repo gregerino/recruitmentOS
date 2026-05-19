@@ -567,7 +567,7 @@ const Analyzer = (() => {
       trait: comp.trait,
       b5Ideal: comp.b5Ideal,
       b5Rationale: comp.b5Rationale,
-      selected: false,
+      selected: true,
       levels: {
         beginner: generateLevelDesc(comp.name, 'beginner', analysis),
         mid: generateLevelDesc(comp.name, 'mid', analysis),
@@ -1268,10 +1268,8 @@ const Analyzer = (() => {
     const selectedTraits = new Set();
     selectedIds.forEach(id => { if (traitMap[id]) selectedTraits.add(traitMap[id]); });
 
-    // Filter bigFive questions by selected traits
-    if (selectedTraits.size > 0) {
-      allQuestions.bigFive = allQuestions.bigFive.filter(q => selectedTraits.has(q.trait));
-    }
+    // Filter bigFive questions by selected traits (remove all if none selected)
+    allQuestions.bigFive = allQuestions.bigFive.filter(q => selectedTraits.has(q.trait));
 
     // Filter technical questions
     if (!hasTech) {
@@ -1310,15 +1308,52 @@ const Analyzer = (() => {
     const competencies = buildCompetencies(analysis);
     const bigFive = buildBigFive(analysis);
     const competencyLibrary = buildCompetencyLibrary(competencies, analysis, bigFive);
-    const questions = buildQuestions(analysis);
+
+    // Build questions filtered by selected competencies only
+    const selectedIds = competencyLibrary.filter(c => c.selected).map(c => c.id);
+    const questions = buildQuestionsForSelection(selectedIds, analysis, _lang);
     const followUps = buildFollowUps();
-    const scorecard = buildScorecard(competencies, analysis);
+    const scorecard = buildScorecardFromLibrary(competencyLibrary.filter(c => c.selected), analysis);
 
     return { analysis, competencies, competencyLibrary, bigFive, questions, followUps, scorecard };
   }
 
+  // Build a standalone default library with only Big Five competencies (no analysis needed)
+  function buildDefaultLibrary() {
+    const defaultBigFive = {
+      openness:            { ideal: 'medium', rationale: L('Openness supports adaptability and continuous learning across any role.', 'Öppenhet stöder anpassningsförmåga och kontinuerligt lärande i alla roller.') },
+      conscientiousness:   { ideal: 'medium-high', rationale: L('Reliability and follow-through are broadly valued traits in the workplace.', 'Tillförlitlighet och uppföljning är brett värderade egenskaper i arbetslivet.') },
+      extraversion:        { ideal: 'medium', rationale: L('A balanced level of extraversion supports both collaboration and focused work.', 'En balanserad nivå av extraversion stöder både samarbete och fokuserat arbete.') },
+      agreeableness:       { ideal: 'medium', rationale: L('Empathy and cooperation are important for healthy team dynamics.', 'Empati och samarbetsvilja är viktigt för sund teamdynamik.') },
+      emotionalStability:  { ideal: 'high', rationale: L('Emotional stability supports consistent performance under pressure.', 'Emotionell stabilitet stöder konsekvent prestation under press.') },
+    };
+    const dummyAnalysis = { title: '', seniority: 'mid', techSkills: {}, softSkills: [], leadership: { present: false }, collaboration: { level: 'medium' }, responsibilities: [], techVsSoft: '' };
+
+    return buildBigFiveCompetencies(defaultBigFive, dummyAnalysis).map(comp => ({
+      id: comp.id,
+      name: comp.name,
+      description: comp.why,
+      category: comp.category,
+      source: 'bigFive',
+      trait: comp.trait,
+      b5Ideal: comp.b5Ideal,
+      b5Rationale: comp.b5Rationale,
+      selected: true,
+      levels: {
+        beginner: generateLevelDesc(comp.name, 'beginner', dummyAnalysis),
+        mid: generateLevelDesc(comp.name, 'mid', dummyAnalysis),
+        senior: generateLevelDesc(comp.name, 'senior', dummyAnalysis),
+      },
+      positiveBehaviors: comp.observable,
+      riskIndicators: generateRiskIndicators(comp.name),
+      exampleEvidence: generateEvidence(comp.name),
+      evaluationCriteria: generateCriteria(comp.name),
+    }));
+  }
+
   return {
     analyze,
+    buildDefaultLibrary,
     buildQuestionsForSelection,
     buildScorecardFromLibrary,
     setLang(lang) { _lang = lang; },

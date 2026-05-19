@@ -7,6 +7,7 @@
 
   let lastAnalysisData = null;
   let lastText = '';
+  let preSelectedB5 = new Set(); // Track B5 selections made before analysis
 
   // --- Character count & button state ---
   function updateCharCount() {
@@ -229,6 +230,10 @@
 
     // Update sidebar phase labels
     updatePhaseLabels();
+
+    // Re-render landing competency library with new language
+    Analyzer.setLang(lang);
+    renderLandingLibrary();
 
     // Re-analyze and re-render results if we have data
     if (lastAnalysisData && lastText) {
@@ -910,6 +915,21 @@
     }
 
     const data = Analyzer.analyze(text, T.getLang());
+
+    // Carry over B5 pre-selections from landing page
+    if (preSelectedB5.size > 0) {
+      data.competencyLibrary.forEach(c => {
+        if (c.source === 'bigFive' && preSelectedB5.has(c.id)) {
+          c.selected = true;
+        }
+      });
+      // Rebuild questions & scorecard to reflect pre-selections
+      const selected = data.competencyLibrary.filter(c => c.selected);
+      const selectedIds = selected.map(c => c.id);
+      data.questions = Analyzer.buildQuestionsForSelection(selectedIds, data.analysis, T.getLang());
+      data.scorecard = Analyzer.buildScorecardFromLibrary(selected, data.analysis);
+    }
+
     lastAnalysisData = data;
 
     document.getElementById('role-title-header').textContent = data.analysis.title;
@@ -923,10 +943,53 @@
     setupResultsInteractivity();
   }
 
+  // --- Landing Competency Library ---
+  function renderLandingLibrary() {
+    const container = document.getElementById('landing-competency-library');
+    if (!container) return;
+    const defaultLib = Analyzer.buildDefaultLibrary();
+    // Mark any previously selected ones
+    defaultLib.forEach(c => { if (preSelectedB5.has(c.id)) c.selected = true; });
+    container.innerHTML = Renderer.renderCompetencyLibraryHTML({ competencyLibrary: defaultLib });
+    setupLandingCompetencyToggles();
+  }
+
+  function setupLandingCompetencyToggles() {
+    const container = document.getElementById('landing-competency-library');
+    if (!container) return;
+
+    container.addEventListener('change', (e) => {
+      const checkbox = e.target;
+      if (!checkbox.dataset.compId) return;
+      const compId = checkbox.dataset.compId;
+      const card = checkbox.closest('.comp-lib-card');
+
+      if (checkbox.checked) {
+        preSelectedB5.add(compId);
+      } else {
+        preSelectedB5.delete(compId);
+      }
+
+      if (card) {
+        card.classList.toggle('comp-lib-selected', checkbox.checked);
+        card.classList.toggle('comp-lib-deselected', !checkbox.checked);
+      }
+    });
+
+    container.addEventListener('click', (e) => {
+      if (e.target.closest('.comp-lib-toggle')) return;
+      const card = e.target.closest('.comp-lib-card');
+      if (card && e.target.closest('.comp-lib-header')) {
+        card.classList.toggle('open');
+      }
+    });
+  }
+
   // --- Init ---
   setupLangToggles();
   setupLandingPreviews();
   updateLandingText();
   setupNotesExtraction();
   setupFloatingPanel();
+  renderLandingLibrary();
 })();

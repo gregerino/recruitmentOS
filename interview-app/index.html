@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RecruitmentOS — AI Interview Package Generator</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=11">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -38,19 +38,16 @@
             <li class="phase-label" data-t="phasePrepare">PREPARE</li>
             <li><a href="#" class="nav-link nav-preview-link" data-preview="bias"><span class="nav-icon">⚖️</span><span class="nav-text" data-t-nav="bias">Bias Checklist</span></a></li>
             <li><a href="#" class="nav-link nav-preview-link" data-preview="compAnalysis"><span class="nav-icon">🔍</span><span class="nav-text" data-t-nav="compAnalysis">Competency Analysis</span></a></li>
-            <li><a href="#" class="nav-link nav-preview-link" data-preview="questions"><span class="nav-icon">💬</span><span class="nav-text" data-t-nav="questions">Interview Questions</span></a></li>
-            <li><a href="#" class="nav-link nav-preview-link" data-preview="followups"><span class="nav-icon">🔄</span><span class="nav-text" data-t-nav="followups">Follow-Up Questions</span></a></li>
+            <li><a href="#" class="nav-link nav-preview-link" data-preview="compLibrary"><span class="nav-icon">📚</span><span class="nav-text" data-t-nav="compLibrary">Competency Library</span></a></li>
 
             <li class="phase-label" data-t="phaseInterview">DURING INTERVIEW</li>
+            <li><a href="#" class="nav-link nav-preview-link" data-preview="questions"><span class="nav-icon">💬</span><span class="nav-text" data-t-nav="questions">Interview Questions</span></a></li>
+            <li><a href="#" class="nav-link nav-preview-link" data-preview="followups"><span class="nav-icon">🔄</span><span class="nav-text" data-t-nav="followups">Follow-Up Questions</span></a></li>
             <li><a href="#" class="nav-link nav-preview-link" data-preview="scorecard"><span class="nav-icon">📊</span><span class="nav-text" data-t-nav="scorecard">Scorecard</span></a></li>
 
             <li class="phase-label" data-t="phaseEvaluate">AFTER INTERVIEW</li>
             <li><a href="#" class="nav-link nav-preview-link" data-preview="summaryTemplate"><span class="nav-icon">📝</span><span class="nav-text" data-t-nav="summaryTemplate">Summary Template</span></a></li>
             <li><a href="#" class="nav-link nav-preview-link" data-preview="recommendations"><span class="nav-icon">✅</span><span class="nav-text" data-t-nav="recommendations">Recommendations</span></a></li>
-
-            <li class="phase-label" data-t="phaseReference">REFERENCE</li>
-            <li><a href="#" class="nav-link nav-preview-link" data-preview="compLibrary"><span class="nav-icon">📚</span><span class="nav-text" data-t-nav="compLibrary">Competency Library</span></a></li>
-            <li><a href="#" class="nav-link nav-preview-link" data-preview="bigFive"><span class="nav-icon">🧠</span><span class="nav-text" data-t-nav="bigFive">Big Five Indicators</span></a></li>
           </ul>
         </nav>
 
@@ -112,6 +109,9 @@
                 </button>
               </div>
             </div>
+
+            <!-- Pre-analysis competency library -->
+            <div id="landing-competency-library" class="landing-competency-library"></div>
 
             <!-- Section preview panel -->
             <div id="section-preview-panel" class="section-preview-panel" style="display:none">
@@ -272,9 +272,9 @@
 
   </div>
 
-  <script src="translations.js?v=5"></script>
-  <script src="analyzer.js?v=5"></script>
-  <script src="renderer.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="translations.js?v=11"></script>
+  <script src="analyzer.js?v=11"></script>
+  <script src="renderer.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
