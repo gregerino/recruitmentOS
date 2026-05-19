@@ -199,6 +199,15 @@
     textarea.focus();
   });
 
+  // --- Logo Home ---
+  const logoHome = document.getElementById('logo-home');
+  if (logoHome) {
+    logoHome.addEventListener('click', (e) => {
+      e.preventDefault();
+      newBtn.click();
+    });
+  }
+
   // --- Language Toggle ---
   function setupLangToggles() {
     document.querySelectorAll('.lang-toggle').forEach(toggle => {

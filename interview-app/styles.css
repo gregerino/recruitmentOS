@@ -124,6 +124,8 @@ body {
   font-weight: 700;
   font-size: 18px;
   color: var(--text-primary);
+  text-decoration: none;
+  cursor: pointer;
 }
 
 /* Landing Layout — sidebar + main side by side */
