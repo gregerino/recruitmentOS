@@ -901,11 +901,21 @@
     updateAutoRecommendation();
   }
 
+  // --- Notes collapse toggle ---
+  function setupNotesCollapse() {
+    const btn = document.querySelector('.notes-collapse-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      btn.closest('.interview-notes-panel').classList.toggle('collapsed');
+    });
+  }
+
   // --- Post-render setup (called after Renderer.renderAll) ---
   function setupResultsInteractivity(preserveScores) {
     setupStarRatings();
     setupSectionToggles();
     setupCompetencyToggles();
+    setupNotesCollapse();
     buildFloatingScorecard();
     showFloatingToggle(true);
     if (!preserveScores) {
