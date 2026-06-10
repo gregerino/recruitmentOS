@@ -1166,6 +1166,15 @@ body {
   font-style: italic;
 }
 
+.floating-panel-body .transcript-flow {
+  margin: 0;
+}
+
+.floating-panel-body .interim-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .floating-panel-footer {
   display: flex;
   gap: 6px;

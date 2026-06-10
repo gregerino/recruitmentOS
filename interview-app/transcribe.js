@@ -19,16 +19,24 @@
   if (!toggleBtn || !panel) return;
 
   let source = 'microphone';
-  let mediaRecorder = null;
-  let stream = null;
-  let analyser = null;
-  let animFrame = 0;
+  let isRecording = false;
   let timerInterval = null;
   let elapsed = 0;
-  let pendingChunks = 0;
-  let transcripts = [];
-  const CHUNK_MS = 5000;
+  let transcripts = [];    // finalized segments
+  let interimText = '';     // current interim (speech API only)
   const BAR_COUNT = 24;
+
+  // Speech recognition (mic mode)
+  let recognition = null;
+  let micStream = null;
+  let analyser = null;
+  let animFrame = 0;
+
+  // Whisper fallback (system audio mode)
+  let mediaRecorder = null;
+  let systemStream = null;
+  let pendingChunks = 0;
+  const CHUNK_MS = 2000;
 
   // Build audio level bars
   for (let i = 0; i < BAR_COUNT; i++) {
@@ -53,7 +61,7 @@
   // Source toggle
   sourceBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-      if (mediaRecorder) return;
+      if (isRecording) return;
       sourceBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       source = btn.dataset.source;
@@ -63,9 +71,9 @@
   function setStatus(status) {
     statusEl.style.display = 'flex';
     badgeEl.className = 'rec-badge ' + status;
-    if (status === 'recording') badgeEl.textContent = 'Spelar in...';
+    if (status === 'recording') badgeEl.textContent = 'Lyssnar...';
     else if (status === 'transcribing') badgeEl.textContent = 'Transkriberar...';
-    else { badgeEl.textContent = 'Klar'; statusEl.style.display = 'none'; }
+    else { badgeEl.textContent = ''; statusEl.style.display = 'none'; }
   }
 
   function formatTime(s) {
@@ -78,51 +86,30 @@
     return d.innerHTML;
   }
 
-  function renderTranscripts() {
-    if (transcripts.length === 0) {
+  function render() {
+    const hasContent = transcripts.length > 0 || interimText;
+    if (!hasContent) {
       bodyEl.innerHTML = '<p class="placeholder-text">Transkriberad text visas här...</p>';
       footerEl.style.display = 'none';
-    } else {
-      bodyEl.innerHTML = transcripts.map(t => '<p>' + escapeHtml(t) + '</p>').join('');
-      footerEl.style.display = 'flex';
-      bodyEl.scrollTop = bodyEl.scrollHeight;
+      return;
     }
+
+    let html = '';
+    if (transcripts.length > 0) {
+      html += transcripts.map(t => '<span>' + escapeHtml(t) + '</span>').join(' ');
+    }
+    if (interimText) {
+      html += ' <span class="interim-text">' + escapeHtml(interimText) + '</span>';
+    }
+    bodyEl.innerHTML = '<p class="transcript-flow">' + html + '</p>';
+    footerEl.style.display = transcripts.length > 0 ? 'flex' : 'none';
+    bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
-  async function sendChunk(blob) {
-    if (blob.size < 1000) return;
-    pendingChunks++;
-    try {
-      const formData = new FormData();
-      formData.append('file', blob, 'chunk.webm');
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'sv');
-      formData.append('response_format', 'json');
-      formData.append('prompt', 'Transkribera följande svenska ljud noggrant. Använd korrekt svensk stavning, grammatik och interpunktion. Skriv ut siffror som ord när det är naturligt. Använd versaler vid egennamn och meningsstart. Inkludera skiljetecken som punkt, komma och frågetecken.');
-
-      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'HTTP ' + res.status);
-      }
-      const data = await res.json();
-      if (data.text && data.text.trim()) {
-        transcripts.push(data.text.trim());
-        renderTranscripts();
-      }
-    } catch (e) {
-      console.error('Transcription error:', e);
-    } finally {
-      pendingChunks--;
-      if (pendingChunks === 0 && (!mediaRecorder || mediaRecorder.state !== 'recording')) {
-        setStatus('idle');
-      }
-    }
-  }
-
-  function startLevelMonitor(audioStream) {
+  // ─── Audio level monitor ───
+  function startLevelMonitor(stream) {
     const ctx = new AudioContext();
-    const src = ctx.createMediaStreamSource(audioStream);
+    const src = ctx.createMediaStreamSource(stream);
     analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     src.connect(analyser);
@@ -141,22 +128,129 @@
     tick();
   }
 
-  async function startRecording() {
+  function stopLevelMonitor() {
+    cancelAnimationFrame(animFrame);
+    audioLevelEl.style.display = 'none';
+    bars.forEach(b => { b.style.height = '3px'; b.style.opacity = '0.15'; });
+  }
+
+  // ─── Web Speech API (microphone — instant) ───
+  function startSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      // Fallback to Whisper if Speech API unavailable
+      startWhisperRecording('microphone');
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = 'sv-SE';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) {
+            transcripts.push(text);
+          }
+          interimText = '';
+        } else {
+          interim += result[0].transcript;
+        }
+      }
+      if (interim) interimText = interim;
+      render();
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech') return; // normal, just silence
+      console.error('Speech recognition error:', event.error);
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if still recording (browser stops after silence)
+      if (isRecording && source === 'microphone') {
+        try { recognition.start(); } catch (e) { /* already started */ }
+      }
+    };
+
+    // Get mic stream for level monitor
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      micStream = stream;
+      startLevelMonitor(stream);
+      audioLevelEl.style.display = 'flex';
+    }).catch(() => {});
+
+    recognition.start();
+  }
+
+  function stopSpeechRecognition() {
+    if (recognition) {
+      recognition.onend = null; // prevent auto-restart
+      recognition.stop();
+      recognition = null;
+    }
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+    // Finalize any interim text
+    if (interimText.trim()) {
+      transcripts.push(interimText.trim());
+      interimText = '';
+    }
+    render();
+  }
+
+  // ─── Whisper API (system audio — chunked) ───
+  async function sendChunk(blob) {
+    if (blob.size < 500) return;
+    pendingChunks++;
+    setStatus('transcribing');
     try {
-      if (source === 'microphone') {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, sampleRate: 16000 }
-        });
+      const formData = new FormData();
+      formData.append('file', blob, 'chunk.webm');
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'sv');
+      formData.append('response_format', 'json');
+      formData.append('prompt', (transcripts.slice(-3).join('. ') || 'Transkribera följande svenska ljud noggrant.'));
+
+      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (data.text && data.text.trim()) {
+        transcripts.push(data.text.trim());
+        render();
+      }
+    } catch (e) {
+      console.error('Transcription error:', e);
+    } finally {
+      pendingChunks--;
+      if (pendingChunks === 0 && isRecording) setStatus('recording');
+      if (pendingChunks === 0 && !isRecording) setStatus('idle');
+    }
+  }
+
+  async function startWhisperRecording(src) {
+    try {
+      let stream;
+      if (src === 'microphone') {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
       } else {
         stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length === 0) {
+        if (stream.getAudioTracks().length === 0) {
           stream.getTracks().forEach(t => t.stop());
           return;
         }
         stream.getVideoTracks().forEach(t => t.stop());
       }
 
+      systemStream = stream;
       startLevelMonitor(stream);
       audioLevelEl.style.display = 'flex';
 
@@ -165,52 +259,61 @@
       mediaRecorder = new MediaRecorder(stream, { mimeType });
 
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          setStatus('transcribing');
-          sendChunk(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        if (pendingChunks === 0) setStatus('idle');
+        if (e.data.size > 0) sendChunk(e.data);
       };
 
       mediaRecorder.start(CHUNK_MS);
-      setStatus('recording');
-      elapsed = 0;
-      timerEl.textContent = '00:00';
-      timerInterval = setInterval(() => {
-        elapsed++;
-        timerEl.textContent = formatTime(elapsed);
-      }, 1000);
-
-      recBtn.classList.add('recording');
-      micIcon.style.display = 'none';
-      stopIcon.style.display = 'block';
-      toggleBtn.classList.add('is-recording');
     } catch (e) {
       console.error('Recording error:', e);
     }
   }
 
+  function stopWhisperRecording() {
+    if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
+    if (systemStream) { systemStream.getTracks().forEach(t => t.stop()); systemStream = null; }
+  }
+
+  // ─── Start / Stop ───
+  function startRecording() {
+    isRecording = true;
+    elapsed = 0;
+    timerEl.textContent = '00:00';
+    timerInterval = setInterval(() => { elapsed++; timerEl.textContent = formatTime(elapsed); }, 1000);
+    setStatus('recording');
+
+    recBtn.classList.add('recording');
+    micIcon.style.display = 'none';
+    stopIcon.style.display = 'block';
+    toggleBtn.classList.add('is-recording');
+
+    if (source === 'microphone') {
+      startSpeechRecognition();
+    } else {
+      startWhisperRecording('system');
+    }
+  }
+
   function stopRecording() {
-    if (mediaRecorder) mediaRecorder.stop();
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    cancelAnimationFrame(animFrame);
+    isRecording = false;
     clearInterval(timerInterval);
-    audioLevelEl.style.display = 'none';
-    bars.forEach(b => { b.style.height = '3px'; b.style.opacity = '0.15'; });
+    stopLevelMonitor();
 
     recBtn.classList.remove('recording');
     micIcon.style.display = 'block';
     stopIcon.style.display = 'none';
     toggleBtn.classList.remove('is-recording');
-    mediaRecorder = null;
-    stream = null;
+
+    if (source === 'microphone') {
+      stopSpeechRecognition();
+    } else {
+      stopWhisperRecording();
+    }
+
+    if (pendingChunks === 0) setStatus('idle');
   }
 
   recBtn.addEventListener('click', () => {
-    if (!mediaRecorder) startRecording();
+    if (!isRecording) startRecording();
     else stopRecording();
   });
 
@@ -230,6 +333,7 @@
 
   clearBtn.addEventListener('click', () => {
     transcripts = [];
-    renderTranscripts();
+    interimText = '';
+    render();
   });
 })();
