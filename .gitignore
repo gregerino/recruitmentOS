@@ -1,6 +1,9 @@
 # Ignore non-portfolio files
 .DS_Store
 .claude/
+node_modules/
+.env.local
+.env
 *.zip
 portfolio-standalone.html
 map pics portfolio/

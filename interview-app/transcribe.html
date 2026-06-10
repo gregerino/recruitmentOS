@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RecruitmentOS — Transkribering</title>
+  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    .transcribe-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .transcribe-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .transcribe-header .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-decoration: none;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-left .divider-v {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+    }
+
+    .header-left h2 {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .transcribe-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 24px;
+      gap: 24px;
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .transcribe-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-align: center;
+    }
+
+    /* Source toggle */
+    .source-toggle {
+      display: flex;
+      background: var(--bg-card);
+      border-radius: var(--radius-pill);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .source-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .source-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .source-btn:not(.active):hover {
+      color: var(--text-primary);
+      background: var(--bg-elevated);
+    }
+
+    .source-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Record button */
+    .record-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .record-btn {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      color: var(--text-primary);
+    }
+
+    .record-btn:hover {
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+    }
+
+    .record-btn.recording {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      animation: pulse-ring 1.5s ease infinite;
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(246, 82, 33, 0.4); }
+      50% { box-shadow: 0 0 0 12px rgba(246, 82, 33, 0); }
+    }
+
+    .record-btn svg {
+      width: 32px;
+      height: 32px;
+    }
+
+    /* Audio level */
+    .audio-level {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      height: 32px;
+      justify-content: center;
+    }
+
+    .audio-bar {
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+      transition: height 0.075s;
+      min-height: 4px;
+    }
+
+    /* Status */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .status-badge {
+      padding: 4px 12px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-badge.recording {
+      background: var(--red-dim);
+      color: var(--red);
+      animation: pulse-opacity 1.5s ease infinite;
+    }
+
+    .status-badge.transcribing {
+      background: var(--amber-dim);
+      color: var(--amber);
+    }
+
+    .status-badge.idle {
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+    }
+
+    @keyframes pulse-opacity {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .timer {
+      font-family: 'Inter', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Error */
+    .error-msg {
+      color: var(--red);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    /* Transcript card */
+    .transcript-card {
+      flex: 1;
+      width: 100%;
+      min-height: 300px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .transcript-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+    }
+
+    .transcript-body .placeholder {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .transcript-body p {
+      margin-bottom: 8px;
+    }
+
+    .transcript-actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .transcript-actions .btn-secondary,
+    .transcript-actions .btn-ghost {
+      font-size: 13px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .transcript-actions .btn-ghost {
+      margin-left: auto;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+    }
+
+    .transcript-actions .btn-ghost:hover {
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+    }
+
+    .btn-secondary {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      font-weight: 500;
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary svg,
+    .btn-ghost svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .back-link {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .back-link:hover {
+      color: var(--text-primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="transcribe-page">
+    <header class="transcribe-header">
+      <div class="header-left">
+        <a href="/" class="logo">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#F65221"/><circle cx="14" cy="14" r="5.5" stroke="#fff" stroke-width="2.2"/><path d="M18.5 18.5L22.5 22.5" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>
+          <span>RecruitmentOS</span>
+        </a>
+        <div class="divider-v"></div>
+        <h2>Transkribering</h2>
+      </div>
+      <a href="/" class="back-link">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Tillbaka
+      </a>
+    </header>
+
+    <div class="transcribe-body">
+
+      <!-- Source toggle -->
+      <div class="source-toggle">
+        <button class="source-btn active" data-source="microphone">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+          </svg>
+          Mikrofon
+        </button>
+        <button class="source-btn" data-source="system">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <path stroke-linecap="round" d="M8 21h8M12 17v4"/>
+          </svg>
+          Systemljud
+        </button>
+      </div>
+
+      <!-- Record -->
+      <div class="record-area">
+        <button class="record-btn" id="record-btn">
+          <svg id="mic-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+          </svg>
+          <svg id="stop-icon" style="display:none" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+        </button>
+
+        <div class="audio-level" id="audio-level" style="display:none"></div>
+
+        <div class="status-row" id="status-row" style="display:none">
+          <span class="status-badge idle" id="status-badge">Klar</span>
+          <span class="timer" id="timer">00:00</span>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div class="error-msg" id="error-msg" style="display:none"></div>
+
+      <!-- Transcript -->
+      <div class="transcript-card">
+        <div class="transcript-body" id="transcript-body">
+          <p class="placeholder">Transkriberad text visas här...</p>
+        </div>
+        <div class="transcript-actions" id="transcript-actions" style="display:none">
+          <button class="btn-secondary" id="copy-btn">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-3"/></svg>
+            Kopiera
+          </button>
+          <button class="btn-secondary" id="download-btn">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M12 5v14M5 12l7 7 7-7"/></svg>
+            Ladda ner .txt
+          </button>
+          <button class="btn-ghost" id="clear-btn">Rensa</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const recordBtn = document.getElementById('record-btn');
+      const micIcon = document.getElementById('mic-icon');
+      const stopIcon = document.getElementById('stop-icon');
+      const audioLevelEl = document.getElementById('audio-level');
+      const statusRow = document.getElementById('status-row');
+      const statusBadge = document.getElementById('status-badge');
+      const timerEl = document.getElementById('timer');
+      const errorMsg = document.getElementById('error-msg');
+      const transcriptBody = document.getElementById('transcript-body');
+      const transcriptActions = document.getElementById('transcript-actions');
+      const copyBtn = document.getElementById('copy-btn');
+      const downloadBtn = document.getElementById('download-btn');
+      const clearBtn = document.getElementById('clear-btn');
+
+      const sourceBtns = document.querySelectorAll('.source-btn');
+
+      let source = 'microphone';
+      let mediaRecorder = null;
+      let stream = null;
+      let analyser = null;
+      let animFrame = 0;
+      let timerInterval = null;
+      let elapsed = 0;
+      let pendingChunks = 0;
+      let transcripts = [];
+      const CHUNK_MS = 5000;
+      const BAR_COUNT = 28;
+
+      // Build audio level bars
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'audio-bar';
+        bar.style.height = '4px';
+        audioLevelEl.appendChild(bar);
+      }
+      const bars = audioLevelEl.querySelectorAll('.audio-bar');
+
+      // Source toggle
+      sourceBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (mediaRecorder) return;
+          sourceBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          source = btn.dataset.source;
+        });
+      });
+
+      function setStatus(status) {
+        statusRow.style.display = 'flex';
+        statusBadge.className = 'status-badge ' + status;
+        if (status === 'recording') statusBadge.textContent = 'Spelar in...';
+        else if (status === 'transcribing') statusBadge.textContent = 'Transkriberar...';
+        else statusBadge.textContent = 'Klar';
+      }
+
+      function formatTime(s) {
+        const m = String(Math.floor(s / 60)).padStart(2, '0');
+        const sec = String(s % 60).padStart(2, '0');
+        return m + ':' + sec;
+      }
+
+      function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.style.display = 'block';
+        setTimeout(() => { errorMsg.style.display = 'none'; }, 5000);
+      }
+
+      function addTranscript(text) {
+        transcripts.push(text);
+        renderTranscripts();
+      }
+
+      function renderTranscripts() {
+        if (transcripts.length === 0) {
+          transcriptBody.innerHTML = '<p class="placeholder">Transkriberad text visas här...</p>';
+          transcriptActions.style.display = 'none';
+        } else {
+          transcriptBody.innerHTML = transcripts.map(t => '<p>' + escapeHtml(t) + '</p>').join('');
+          transcriptActions.style.display = 'flex';
+          transcriptBody.scrollTop = transcriptBody.scrollHeight;
+        }
+      }
+
+      function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      async function sendChunk(blob) {
+        if (blob.size < 1000) return;
+        pendingChunks++;
+        try {
+          const formData = new FormData();
+          formData.append('file', blob, 'chunk.webm');
+          formData.append('model', 'whisper-1');
+          formData.append('language', 'sv');
+          formData.append('response_format', 'json');
+          formData.append('prompt', 'Transkribera följande svenska ljud noggrant. Använd korrekt svensk stavning, grammatik och interpunktion. Skriv ut siffror som ord när det är naturligt. Använd versaler vid egennamn och meningsstart. Inkludera skiljetecken som punkt, komma och frågetecken.');
+
+          const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.error || 'HTTP ' + res.status);
+          }
+          const data = await res.json();
+          if (data.text && data.text.trim()) {
+            addTranscript(data.text.trim());
+          }
+        } catch (e) {
+          showError(e.message || 'Transkribering misslyckades');
+        } finally {
+          pendingChunks--;
+          if (pendingChunks === 0 && (!mediaRecorder || mediaRecorder.state !== 'recording')) {
+            setStatus('idle');
+          }
+        }
+      }
+
+      function startLevelMonitor(audioStream) {
+        const ctx = new AudioContext();
+        const src = ctx.createMediaStreamSource(audioStream);
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        src.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        function tick() {
+          analyser.getByteFrequencyData(dataArray);
+          const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length / 255;
+          bars.forEach((bar, i) => {
+            const active = i / BAR_COUNT < avg;
+            const h = Math.max(4, avg * 32 * (0.5 + Math.random() * 0.5));
+            bar.style.height = h + 'px';
+            bar.style.opacity = active ? '1' : '0.15';
+          });
+          animFrame = requestAnimationFrame(tick);
+        }
+        tick();
+      }
+
+      async function startRecording() {
+        try {
+          if (source === 'microphone') {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: { channelCount: 1, sampleRate: 16000 }
+            });
+          } else {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true, audio: true
+            });
+            const audioTracks = stream.getAudioTracks();
+            if (audioTracks.length === 0) {
+              stream.getTracks().forEach(t => t.stop());
+              showError("Inget systemljud hittades. Välj en flik med ljud och markera 'Dela ljud'.");
+              return;
+            }
+            stream.getVideoTracks().forEach(t => t.stop());
+          }
+
+          startLevelMonitor(stream);
+          audioLevelEl.style.display = 'flex';
+
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus' : 'audio/webm';
+
+          mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              setStatus('transcribing');
+              sendChunk(e.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            if (pendingChunks === 0) setStatus('idle');
+          };
+
+          mediaRecorder.start(CHUNK_MS);
+          setStatus('recording');
+          elapsed = 0;
+          timerEl.textContent = '00:00';
+          timerInterval = setInterval(() => {
+            elapsed++;
+            timerEl.textContent = formatTime(elapsed);
+          }, 1000);
+
+          recordBtn.classList.add('recording');
+          micIcon.style.display = 'none';
+          stopIcon.style.display = 'block';
+        } catch (e) {
+          if (e.name === 'NotAllowedError') {
+            showError('Åtkomst nekad. Tillåt mikrofon/skärmdelning i webbläsaren.');
+          } else {
+            showError(e.message || 'Kunde inte starta inspelning');
+          }
+        }
+      }
+
+      function stopRecording() {
+        if (mediaRecorder) mediaRecorder.stop();
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        cancelAnimationFrame(animFrame);
+        clearInterval(timerInterval);
+        audioLevelEl.style.display = 'none';
+        bars.forEach(b => { b.style.height = '4px'; b.style.opacity = '0.15'; });
+
+        recordBtn.classList.remove('recording');
+        micIcon.style.display = 'block';
+        stopIcon.style.display = 'none';
+        mediaRecorder = null;
+        stream = null;
+      }
+
+      recordBtn.addEventListener('click', () => {
+        if (!mediaRecorder) startRecording();
+        else stopRecording();
+      });
+
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(transcripts.join(' '));
+      });
+
+      downloadBtn.addEventListener('click', () => {
+        const blob = new Blob([transcripts.join('\n\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'transkription-' + new Date().toISOString().slice(0, 19) + '.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      clearBtn.addEventListener('click', () => {
+        transcripts = [];
+        renderTranscripts();
+      });
+    })();
+  </script>
+</body>
+</html>

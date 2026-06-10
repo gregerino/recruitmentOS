@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/api/transcribe", "destination": "/api/transcribe" },
     { "source": "/(.*)", "destination": "/interview-app/$1" }
   ]
 }
