@@ -697,13 +697,10 @@ body {
   height: 36px;
 }
 
-.notes-transcribe-toolbar .source-toggle {
-  font-size: 11px;
-}
-
-.notes-transcribe-toolbar .source-btn {
-  padding: 5px 10px;
-  font-size: 11px;
+.notes-transcribe-toolbar .rec-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .notes-transcribe-toolbar .audio-level {

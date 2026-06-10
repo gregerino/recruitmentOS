@@ -6,29 +6,21 @@ function initTranscribe() {
   const statusEl = document.getElementById('rec-status');
   const badgeEl = document.getElementById('rec-badge');
   const timerEl = document.getElementById('rec-timer');
-  const sourceBtns = document.querySelectorAll('.source-btn');
+  const labelEl = document.getElementById('rec-label');
 
   if (!recBtn) return;
 
-  let source = 'microphone';
   let isRecording = false;
   let timerInterval = null;
   let elapsed = 0;
-  let transcripts = [];
-  let interimText = '';
   const BAR_COUNT = 24;
 
-  let recognition = null;
+  let mediaRecorder = null;
   let micStream = null;
   let analyser = null;
   let animFrame = 0;
+  let recordedChunks = [];
 
-  let mediaRecorder = null;
-  let systemStream = null;
-  let pendingChunks = 0;
-  const CHUNK_MS = 2000;
-
-  // Build audio level bars
   if (audioLevelEl) {
     for (let i = 0; i < BAR_COUNT; i++) {
       const bar = document.createElement('div');
@@ -39,38 +31,24 @@ function initTranscribe() {
   }
   const bars = audioLevelEl ? audioLevelEl.querySelectorAll('.audio-bar') : [];
 
-  // Source toggle
-  sourceBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (isRecording) return;
-      sourceBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      source = btn.dataset.source;
-    });
-  });
-
   function getNotesTextarea() {
     return document.getElementById('interview-notes');
-  }
-
-  function appendToNotes(text) {
-    const textarea = getNotesTextarea();
-    if (!textarea || !text) return;
-    const current = textarea.value;
-    if (current && !current.endsWith('\n') && !current.endsWith(' ')) {
-      textarea.value = current + ' ' + text;
-    } else {
-      textarea.value = current + text;
-    }
-    textarea.scrollTop = textarea.scrollHeight;
   }
 
   function setStatus(status) {
     statusEl.style.display = 'flex';
     badgeEl.className = 'rec-badge ' + status;
-    if (status === 'recording') badgeEl.textContent = 'Lyssnar...';
-    else if (status === 'transcribing') badgeEl.textContent = 'Transkriberar...';
-    else { badgeEl.textContent = ''; statusEl.style.display = 'none'; }
+    if (status === 'recording') {
+      badgeEl.textContent = 'Spelar in...';
+      if (labelEl) labelEl.style.display = 'none';
+    } else if (status === 'transcribing') {
+      badgeEl.textContent = 'Transkriberar...';
+      if (labelEl) labelEl.style.display = 'none';
+    } else {
+      badgeEl.textContent = '';
+      statusEl.style.display = 'none';
+      if (labelEl) labelEl.style.display = '';
+    }
   }
 
   function formatTime(s) {
@@ -105,141 +83,18 @@ function initTranscribe() {
     bars.forEach(b => { b.style.height = '3px'; b.style.opacity = '0.15'; });
   }
 
-  // ─── Web Speech API (microphone — instant) ───
-  function startSpeechRecognition() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      startWhisperRecording('microphone');
+  // ─── Recording ───
+  async function startRecording() {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, sampleRate: 16000 }
+      });
+    } catch (e) {
+      console.error('Microphone access denied:', e);
       return;
     }
 
-    recognition = new SpeechRecognition();
-    recognition.lang = 'sv-SE';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          const text = result[0].transcript.trim();
-          if (text) {
-            transcripts.push(text);
-            appendToNotes(text);
-          }
-          interimText = '';
-        } else {
-          interimText = result[0].transcript;
-        }
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === 'no-speech') return;
-      console.error('Speech recognition error:', event.error);
-    };
-
-    recognition.onend = () => {
-      if (isRecording && source === 'microphone') {
-        try { recognition.start(); } catch (e) { /* already started */ }
-      }
-    };
-
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-      micStream = stream;
-      startLevelMonitor(stream);
-      if (audioLevelEl) audioLevelEl.style.display = 'flex';
-    }).catch(() => {});
-
-    recognition.start();
-  }
-
-  function stopSpeechRecognition() {
-    if (recognition) {
-      recognition.onend = null;
-      recognition.stop();
-      recognition = null;
-    }
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-    if (interimText.trim()) {
-      transcripts.push(interimText.trim());
-      appendToNotes(interimText.trim());
-      interimText = '';
-    }
-  }
-
-  // ─── Whisper API (system audio — chunked) ───
-  async function sendChunk(blob) {
-    if (blob.size < 500) return;
-    pendingChunks++;
-    setStatus('transcribing');
-    try {
-      const formData = new FormData();
-      formData.append('file', blob, 'chunk.webm');
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'sv');
-      formData.append('response_format', 'json');
-      formData.append('prompt', (transcripts.slice(-3).join('. ') || 'Transkribera följande svenska ljud noggrant.'));
-
-      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      if (data.text && data.text.trim()) {
-        transcripts.push(data.text.trim());
-        appendToNotes(data.text.trim());
-      }
-    } catch (e) {
-      console.error('Transcription error:', e);
-    } finally {
-      pendingChunks--;
-      if (pendingChunks === 0 && isRecording) setStatus('recording');
-      if (pendingChunks === 0 && !isRecording) setStatus('idle');
-    }
-  }
-
-  async function startWhisperRecording(src) {
-    try {
-      let stream;
-      if (src === 'microphone') {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
-      } else {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        if (stream.getAudioTracks().length === 0) {
-          stream.getTracks().forEach(t => t.stop());
-          return;
-        }
-        stream.getVideoTracks().forEach(t => t.stop());
-      }
-
-      systemStream = stream;
-      startLevelMonitor(stream);
-      if (audioLevelEl) audioLevelEl.style.display = 'flex';
-
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus' : 'audio/webm';
-      mediaRecorder = new MediaRecorder(stream, { mimeType });
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) sendChunk(e.data);
-      };
-
-      mediaRecorder.start(CHUNK_MS);
-    } catch (e) {
-      console.error('Recording error:', e);
-    }
-  }
-
-  function stopWhisperRecording() {
-    if (mediaRecorder) { mediaRecorder.stop(); mediaRecorder = null; }
-    if (systemStream) { systemStream.getTracks().forEach(t => t.stop()); systemStream = null; }
-  }
-
-  // ─── Start / Stop ───
-  function startRecording() {
+    recordedChunks = [];
     isRecording = true;
     elapsed = 0;
     timerEl.textContent = '00:00';
@@ -250,11 +105,25 @@ function initTranscribe() {
     micIcon.style.display = 'none';
     stopIcon.style.display = 'block';
 
-    if (source === 'microphone') {
-      startSpeechRecognition();
-    } else {
-      startWhisperRecording('system');
-    }
+    startLevelMonitor(micStream);
+    if (audioLevelEl) audioLevelEl.style.display = 'flex';
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/webm';
+    mediaRecorder = new MediaRecorder(micStream, { mimeType });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+      if (blob.size > 500) {
+        sendToAssemblyAI(blob);
+      }
+    };
+
+    mediaRecorder.start(1000);
   }
 
   function stopRecording() {
@@ -265,14 +134,57 @@ function initTranscribe() {
     recBtn.classList.remove('recording');
     micIcon.style.display = 'block';
     stopIcon.style.display = 'none';
+    recBtn.disabled = true;
 
-    if (source === 'microphone') {
-      stopSpeechRecognition();
-    } else {
-      stopWhisperRecording();
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
     }
 
-    if (pendingChunks === 0) setStatus('idle');
+    setStatus('transcribing');
+  }
+
+  // ─── AssemblyAI ───
+  async function sendToAssemblyAI(blob) {
+    try {
+      const formData = new FormData();
+      formData.append('file', blob, 'interview.webm');
+
+      const res = await fetch('/api/transcribe-assembly', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      const textarea = getNotesTextarea();
+      if (textarea && data.text) {
+        const current = textarea.value.trim();
+        textarea.value = current
+          ? current + '\n\n' + data.text
+          : data.text;
+        textarea.scrollTop = textarea.scrollHeight;
+      }
+    } catch (e) {
+      console.error('AssemblyAI transcription error:', e);
+      const textarea = getNotesTextarea();
+      if (textarea) {
+        const current = textarea.value.trim();
+        textarea.value = current
+          ? current + '\n\n[Transkribering misslyckades: ' + e.message + ']'
+          : '[Transkribering misslyckades: ' + e.message + ']';
+      }
+    } finally {
+      setStatus('idle');
+      recBtn.disabled = false;
+    }
   }
 
   recBtn.addEventListener('click', () => {

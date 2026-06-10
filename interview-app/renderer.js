@@ -419,20 +419,11 @@ const Renderer = (() => {
         <div class="notes-collapsible">
           <div class="notes-transcribe-toolbar">
             <div class="notes-transcribe-left">
-              <button class="rec-btn" id="rec-btn">
+              <button class="rec-btn" id="rec-btn" title="Starta/stoppa transkribering">
                 <svg id="rec-mic-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
                 <svg id="rec-stop-icon" width="18" height="18" fill="currentColor" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
               </button>
-              <div class="source-toggle">
-                <button class="source-btn active" data-source="microphone">
-                  <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
-                  Mikrofon
-                </button>
-                <button class="source-btn" data-source="system">
-                  <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path stroke-linecap="round" d="M8 21h8M12 17v4"/></svg>
-                  System
-                </button>
-              </div>
+              <span class="rec-label" id="rec-label">Transkribera</span>
               <div class="rec-status" id="rec-status" style="display:none">
                 <span class="rec-badge" id="rec-badge"></span>
                 <span class="rec-timer" id="rec-timer">00:00</span>
