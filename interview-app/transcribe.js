@@ -15,11 +15,20 @@ function initTranscribe() {
   let elapsed = 0;
   const BAR_COUNT = 24;
 
+  // Web Speech API (real-time)
+  let recognition = null;
+  let liveTranscripts = [];
+  let interimText = '';
+
+  // MediaRecorder (for AssemblyAI)
   let mediaRecorder = null;
   let micStream = null;
   let analyser = null;
   let animFrame = 0;
   let recordedChunks = [];
+
+  // Track where live text starts in the textarea
+  let textBeforeRecording = '';
 
   if (audioLevelEl) {
     for (let i = 0; i < BAR_COUNT; i++) {
@@ -39,10 +48,10 @@ function initTranscribe() {
     statusEl.style.display = 'flex';
     badgeEl.className = 'rec-badge ' + status;
     if (status === 'recording') {
-      badgeEl.textContent = 'Spelar in...';
+      badgeEl.textContent = 'Lyssnar...';
       if (labelEl) labelEl.style.display = 'none';
     } else if (status === 'transcribing') {
-      badgeEl.textContent = 'Transkriberar...';
+      badgeEl.textContent = 'Analyserar röster...';
       if (labelEl) labelEl.style.display = 'none';
     } else {
       badgeEl.textContent = '';
@@ -53,6 +62,19 @@ function initTranscribe() {
 
   function formatTime(s) {
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  // Render live transcript into textarea
+  function renderLive() {
+    const textarea = getNotesTextarea();
+    if (!textarea) return;
+    const parts = liveTranscripts.slice();
+    if (interimText) parts.push(interimText);
+    const liveText = parts.join(' ');
+    textarea.value = textBeforeRecording
+      ? textBeforeRecording + '\n' + liveText
+      : liveText;
+    textarea.scrollTop = textarea.scrollHeight;
   }
 
   // ─── Audio level monitor ───
@@ -83,6 +105,60 @@ function initTranscribe() {
     bars.forEach(b => { b.style.height = '3px'; b.style.opacity = '0.15'; });
   }
 
+  // ─── Web Speech API (real-time feedback) ───
+  function startSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    recognition = new SpeechRecognition();
+    recognition.lang = 'sv-SE';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) liveTranscripts.push(text);
+          interimText = '';
+        } else {
+          interim += result[0].transcript;
+        }
+      }
+      if (interim) interimText = interim;
+      renderLive();
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech') return;
+      console.error('Speech recognition error:', event.error);
+    };
+
+    recognition.onend = () => {
+      if (isRecording) {
+        try { recognition.start(); } catch (e) { /* already started */ }
+      }
+    };
+
+    recognition.start();
+  }
+
+  function stopSpeechRecognition() {
+    if (recognition) {
+      recognition.onend = null;
+      recognition.stop();
+      recognition = null;
+    }
+    if (interimText.trim()) {
+      liveTranscripts.push(interimText.trim());
+      interimText = '';
+      renderLive();
+    }
+  }
+
   // ─── Recording ───
   async function startRecording() {
     try {
@@ -94,7 +170,12 @@ function initTranscribe() {
       return;
     }
 
+    const textarea = getNotesTextarea();
+    textBeforeRecording = textarea ? textarea.value.trim() : '';
+    liveTranscripts = [];
+    interimText = '';
     recordedChunks = [];
+
     isRecording = true;
     elapsed = 0;
     timerEl.textContent = '00:00';
@@ -108,6 +189,10 @@ function initTranscribe() {
     startLevelMonitor(micStream);
     if (audioLevelEl) audioLevelEl.style.display = 'flex';
 
+    // Start real-time speech recognition
+    startSpeechRecognition();
+
+    // Start recording for AssemblyAI
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus' : 'audio/webm';
     mediaRecorder = new MediaRecorder(micStream, { mimeType });
@@ -120,6 +205,9 @@ function initTranscribe() {
       const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
       if (blob.size > 500) {
         sendToAssemblyAI(blob);
+      } else {
+        setStatus('idle');
+        recBtn.disabled = false;
       }
     };
 
@@ -130,6 +218,7 @@ function initTranscribe() {
     isRecording = false;
     clearInterval(timerInterval);
     stopLevelMonitor();
+    stopSpeechRecognition();
 
     recBtn.classList.remove('recording');
     micIcon.style.display = 'block';
@@ -147,7 +236,7 @@ function initTranscribe() {
     setStatus('transcribing');
   }
 
-  // ─── AssemblyAI ───
+  // ─── AssemblyAI (diarized final result) ───
   async function sendToAssemblyAI(blob) {
     try {
       const formData = new FormData();
@@ -166,21 +255,15 @@ function initTranscribe() {
       const data = await res.json();
       const textarea = getNotesTextarea();
       if (textarea && data.text) {
-        const current = textarea.value.trim();
-        textarea.value = current
-          ? current + '\n\n' + data.text
+        // Replace live text with diarized version
+        textarea.value = textBeforeRecording
+          ? textBeforeRecording + '\n\n' + data.text
           : data.text;
         textarea.scrollTop = textarea.scrollHeight;
       }
     } catch (e) {
-      console.error('AssemblyAI transcription error:', e);
-      const textarea = getNotesTextarea();
-      if (textarea) {
-        const current = textarea.value.trim();
-        textarea.value = current
-          ? current + '\n\n[Transkribering misslyckades: ' + e.message + ']'
-          : '[Transkribering misslyckades: ' + e.message + ']';
-      }
+      console.error('AssemblyAI error:', e);
+      // Keep the live text as fallback — don't overwrite it
     } finally {
       setStatus('idle');
       recBtn.disabled = false;
