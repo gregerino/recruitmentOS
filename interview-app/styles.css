@@ -756,10 +756,6 @@ body {
 
 /* ===== FLOATING SCORECARD PANEL ===== */
 .scorecard-panel-toggle {
-  position: fixed;
-  right: 20px;
-  bottom: 24px;
-  z-index: 200;
   display: none; /* shown via JS when on results page */
   align-items: center;
   gap: 8px;
@@ -780,7 +776,6 @@ body {
   box-shadow: 0 6px 28px rgba(246, 82, 33, 0.5);
 }
 .scorecard-panel-toggle.panel-open {
-  right: 380px;
   background: var(--bg-elevated);
   color: var(--text-secondary);
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -916,6 +911,300 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* ===== FLOATING TOGGLE BUTTONS GROUP ===== */
+.floating-toggles {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 200;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.floating-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  transition: all 0.2s;
+}
+
+.floating-toggle-btn:hover {
+  transform: translateY(-2px);
+  color: var(--text-primary);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+
+.floating-toggle-btn.panel-open {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 4px 20px rgba(246, 82, 33, 0.4);
+}
+
+.floating-toggle-btn.is-recording {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+  animation: pulse-rec 1.5s ease infinite;
+  box-shadow: 0 4px 20px rgba(248, 113, 113, 0.4);
+}
+
+@keyframes pulse-rec {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(248, 113, 113, 0); }
+}
+
+/* ===== FLOATING TRANSCRIBE PANEL ===== */
+.floating-panel {
+  position: fixed;
+  top: 57px;
+  right: 0;
+  width: 380px;
+  height: calc(100vh - 57px);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+}
+
+.floating-panel.open {
+  transform: translateX(0);
+}
+
+.floating-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.floating-panel-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.floating-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floating-panel-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.floating-panel-toolbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.source-toggle {
+  display: flex;
+  background: var(--bg-card);
+  border-radius: 50px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.source-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.source-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.source-btn:not(.active):hover {
+  color: var(--text-secondary);
+}
+
+.rec-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rec-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.rec-btn:hover {
+  border-color: var(--accent);
+}
+
+.rec-btn.recording {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  animation: pulse-rec 1.5s ease infinite;
+}
+
+.rec-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rec-badge {
+  padding: 3px 10px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rec-badge.recording {
+  background: var(--red-dim);
+  color: var(--red);
+  animation: pulse-opacity 1.5s ease infinite;
+}
+
+.rec-badge.transcribing {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.rec-timer {
+  font-size: 13px;
+  font-family: 'Inter', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.audio-level {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  justify-content: center;
+}
+
+.audio-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: height 0.075s;
+  min-height: 3px;
+}
+
+.floating-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.floating-panel-body p {
+  margin-bottom: 6px;
+}
+
+.floating-panel-body .placeholder-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.floating-panel-footer {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.panel-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.panel-action-btn.ghost {
+  margin-left: auto;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.panel-action-btn.ghost:hover {
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
 }
 
 /* ===== SECTION TOGGLES ===== */

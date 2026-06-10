@@ -183,6 +183,8 @@
     showFloatingToggle(false);
     document.getElementById('floating-scorecard')?.classList.remove('open');
     document.getElementById('scorecard-panel-toggle')?.classList.remove('panel-open');
+    document.getElementById('floating-transcribe')?.classList.remove('open');
+    document.getElementById('transcribe-panel-toggle')?.classList.remove('panel-open');
     textarea.value = '';
     charCount.textContent = '0';
     analyzeBtn.disabled = true;
@@ -833,6 +835,8 @@
   function showFloatingToggle(show) {
     const btn = document.getElementById('scorecard-panel-toggle');
     if (btn) btn.style.display = show ? 'flex' : 'none';
+    const container = document.getElementById('floating-toggles');
+    if (container) container.style.display = show ? 'flex' : 'none';
   }
 
 
