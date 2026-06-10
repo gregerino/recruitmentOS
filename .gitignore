@@ -31,3 +31,4 @@ lore.html
 build-export.py
 build_portfolio.py
 build_optimized.py
+.vercel
