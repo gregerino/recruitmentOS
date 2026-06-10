@@ -1,7 +1,4 @@
-(() => {
-  const toggleBtn = document.getElementById('transcribe-panel-toggle');
-  const panel = document.getElementById('floating-transcribe');
-  const closeBtn = document.getElementById('transcribe-close');
+function initTranscribe() {
   const recBtn = document.getElementById('rec-btn');
   const micIcon = document.getElementById('rec-mic-icon');
   const stopIcon = document.getElementById('rec-stop-icon');
@@ -9,54 +6,38 @@
   const statusEl = document.getElementById('rec-status');
   const badgeEl = document.getElementById('rec-badge');
   const timerEl = document.getElementById('rec-timer');
-  const bodyEl = document.getElementById('transcribe-body');
-  const footerEl = document.getElementById('transcribe-footer');
-  const copyBtn = document.getElementById('transcribe-copy');
-  const downloadBtn = document.getElementById('transcribe-download');
-  const clearBtn = document.getElementById('transcribe-clear');
   const sourceBtns = document.querySelectorAll('.source-btn');
 
-  if (!toggleBtn || !panel) return;
+  if (!recBtn) return;
 
   let source = 'microphone';
   let isRecording = false;
   let timerInterval = null;
   let elapsed = 0;
-  let transcripts = [];    // finalized segments
-  let interimText = '';     // current interim (speech API only)
+  let transcripts = [];
+  let interimText = '';
   const BAR_COUNT = 24;
 
-  // Speech recognition (mic mode)
   let recognition = null;
   let micStream = null;
   let analyser = null;
   let animFrame = 0;
 
-  // Whisper fallback (system audio mode)
   let mediaRecorder = null;
   let systemStream = null;
   let pendingChunks = 0;
   const CHUNK_MS = 2000;
 
   // Build audio level bars
-  for (let i = 0; i < BAR_COUNT; i++) {
-    const bar = document.createElement('div');
-    bar.className = 'audio-bar';
-    bar.style.height = '3px';
-    audioLevelEl.appendChild(bar);
+  if (audioLevelEl) {
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'audio-bar';
+      bar.style.height = '3px';
+      audioLevelEl.appendChild(bar);
+    }
   }
-  const bars = audioLevelEl.querySelectorAll('.audio-bar');
-
-  // Panel toggle
-  toggleBtn.addEventListener('click', () => {
-    const isOpen = panel.classList.toggle('open');
-    toggleBtn.classList.toggle('panel-open', isOpen);
-  });
-
-  closeBtn.addEventListener('click', () => {
-    panel.classList.remove('open');
-    toggleBtn.classList.remove('panel-open');
-  });
+  const bars = audioLevelEl ? audioLevelEl.querySelectorAll('.audio-bar') : [];
 
   // Source toggle
   sourceBtns.forEach(btn => {
@@ -68,6 +49,22 @@
     });
   });
 
+  function getNotesTextarea() {
+    return document.getElementById('interview-notes');
+  }
+
+  function appendToNotes(text) {
+    const textarea = getNotesTextarea();
+    if (!textarea || !text) return;
+    const current = textarea.value;
+    if (current && !current.endsWith('\n') && !current.endsWith(' ')) {
+      textarea.value = current + ' ' + text;
+    } else {
+      textarea.value = current + text;
+    }
+    textarea.scrollTop = textarea.scrollHeight;
+  }
+
   function setStatus(status) {
     statusEl.style.display = 'flex';
     badgeEl.className = 'rec-badge ' + status;
@@ -78,32 +75,6 @@
 
   function formatTime(s) {
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-  }
-
-  function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  function render() {
-    const hasContent = transcripts.length > 0 || interimText;
-    if (!hasContent) {
-      bodyEl.innerHTML = '<p class="placeholder-text">Transkriberad text visas här...</p>';
-      footerEl.style.display = 'none';
-      return;
-    }
-
-    let html = '';
-    if (transcripts.length > 0) {
-      html += transcripts.map(t => '<span>' + escapeHtml(t) + '</span>').join(' ');
-    }
-    if (interimText) {
-      html += ' <span class="interim-text">' + escapeHtml(interimText) + '</span>';
-    }
-    bodyEl.innerHTML = '<p class="transcript-flow">' + html + '</p>';
-    footerEl.style.display = transcripts.length > 0 ? 'flex' : 'none';
-    bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
   // ─── Audio level monitor ───
@@ -130,7 +101,7 @@
 
   function stopLevelMonitor() {
     cancelAnimationFrame(animFrame);
-    audioLevelEl.style.display = 'none';
+    if (audioLevelEl) audioLevelEl.style.display = 'none';
     bars.forEach(b => { b.style.height = '3px'; b.style.opacity = '0.15'; });
   }
 
@@ -138,7 +109,6 @@
   function startSpeechRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      // Fallback to Whisper if Speech API unavailable
       startWhisperRecording('microphone');
       return;
     }
@@ -150,40 +120,36 @@
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event) => {
-      let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
           const text = result[0].transcript.trim();
           if (text) {
             transcripts.push(text);
+            appendToNotes(text);
           }
           interimText = '';
         } else {
-          interim += result[0].transcript;
+          interimText = result[0].transcript;
         }
       }
-      if (interim) interimText = interim;
-      render();
     };
 
     recognition.onerror = (event) => {
-      if (event.error === 'no-speech') return; // normal, just silence
+      if (event.error === 'no-speech') return;
       console.error('Speech recognition error:', event.error);
     };
 
     recognition.onend = () => {
-      // Auto-restart if still recording (browser stops after silence)
       if (isRecording && source === 'microphone') {
         try { recognition.start(); } catch (e) { /* already started */ }
       }
     };
 
-    // Get mic stream for level monitor
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
       micStream = stream;
       startLevelMonitor(stream);
-      audioLevelEl.style.display = 'flex';
+      if (audioLevelEl) audioLevelEl.style.display = 'flex';
     }).catch(() => {});
 
     recognition.start();
@@ -191,7 +157,7 @@
 
   function stopSpeechRecognition() {
     if (recognition) {
-      recognition.onend = null; // prevent auto-restart
+      recognition.onend = null;
       recognition.stop();
       recognition = null;
     }
@@ -199,12 +165,11 @@
       micStream.getTracks().forEach(t => t.stop());
       micStream = null;
     }
-    // Finalize any interim text
     if (interimText.trim()) {
       transcripts.push(interimText.trim());
+      appendToNotes(interimText.trim());
       interimText = '';
     }
-    render();
   }
 
   // ─── Whisper API (system audio — chunked) ───
@@ -225,7 +190,7 @@
       const data = await res.json();
       if (data.text && data.text.trim()) {
         transcripts.push(data.text.trim());
-        render();
+        appendToNotes(data.text.trim());
       }
     } catch (e) {
       console.error('Transcription error:', e);
@@ -252,7 +217,7 @@
 
       systemStream = stream;
       startLevelMonitor(stream);
-      audioLevelEl.style.display = 'flex';
+      if (audioLevelEl) audioLevelEl.style.display = 'flex';
 
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus' : 'audio/webm';
@@ -284,7 +249,6 @@
     recBtn.classList.add('recording');
     micIcon.style.display = 'none';
     stopIcon.style.display = 'block';
-    toggleBtn.classList.add('is-recording');
 
     if (source === 'microphone') {
       startSpeechRecognition();
@@ -301,7 +265,6 @@
     recBtn.classList.remove('recording');
     micIcon.style.display = 'block';
     stopIcon.style.display = 'none';
-    toggleBtn.classList.remove('is-recording');
 
     if (source === 'microphone') {
       stopSpeechRecognition();
@@ -316,24 +279,4 @@
     if (!isRecording) startRecording();
     else stopRecording();
   });
-
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(transcripts.join(' '));
-  });
-
-  downloadBtn.addEventListener('click', () => {
-    const blob = new Blob([transcripts.join('\n\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'transkription-' + new Date().toISOString().slice(0, 19) + '.txt';
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  clearBtn.addEventListener('click', () => {
-    transcripts = [];
-    interimText = '';
-    render();
-  });
-})();
+}
