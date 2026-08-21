@@ -159,10 +159,6 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports.config = {
-  maxDuration: 300,
-};
-
 async function generatePackage({ apiKey, jd, lang, existing }) {
   const client = new Anthropic({ apiKey });
 
