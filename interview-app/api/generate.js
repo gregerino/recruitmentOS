@@ -2,6 +2,13 @@
 //  /api/generate — turns a job description into a role-specific
 //  competency framework and interview questions using Claude.
 //
+//  Generation runs in two stages. Latency is proportional to
+//  output volume (~56 tokens/second), so one call for the whole
+//  package meant three minutes of blank loading screen. Splitting
+//  it lets the client render the competencies, scorecard and
+//  weighting at roughly the halfway mark and slot the questions in
+//  when they land.
+//
 //  The client always has the rule-based package from analyzer.js
 //  to fall back on, so every failure path here is non-fatal: it
 //  returns an error the UI reports while keeping the local result.
@@ -17,17 +24,17 @@ const MAX_BODY_BYTES = 200 * 1024;
 // caps a single caller's burst rather than global usage — a speed bump,
 // not authentication. Set GENERATE_ACCESS_TOKEN to actually lock it down.
 const RATE_WINDOW_MS = 60 * 1000;
-const RATE_MAX_REQUESTS = 8;
+const RATE_MAX_REQUESTS = 12;
 const recentCalls = new Map();
 
 const CATEGORIES = ['technical', 'behavioral', 'leadership', 'communication', 'problemSolving'];
 const WEIGHTS = ['critical', 'high', 'medium'];
 const QUESTION_CATEGORIES = ['competency', 'situational', 'technical', 'culture'];
 
-const RESPONSE_SCHEMA = {
+const COMPETENCIES_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['roleTitle', 'seniority', 'competencies', 'questions'],
+  required: ['roleTitle', 'seniority', 'competencies'],
   properties: {
     roleTitle: { type: 'string' },
     seniority: { type: 'string', enum: ['junior', 'mid', 'senior', 'lead', 'unspecified'] },
@@ -61,6 +68,14 @@ const RESPONSE_SCHEMA = {
         },
       },
     },
+  },
+};
+
+const QUESTIONS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['questions'],
+  properties: {
     questions: {
       type: 'array',
       items: {
@@ -81,33 +96,36 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-const SYSTEM_PROMPT = `You design structured, competency-based interviews for a hiring tool used by recruiters and hiring managers.
+const SHARED_RULES = `You design structured, competency-based interviews for a hiring tool used by recruiters and hiring managers. Your output drives a real scorecard, so it must be specific enough to rate a candidate against.
 
-Your output drives a real scorecard, so it must be specific enough to rate a candidate against. Follow these rules:
+FAIRNESS — this is a hiring instrument.
+- Never reference or imply age, gender, ethnicity, religion, disability, pregnancy, family status, sexual orientation, or nationality.
+- Nothing about personal life outside work.
+- Cover only capabilities the job description supports.
 
-COMPETENCIES — 6 to 9 of them.
+IDS — id is a lowercase ASCII slug derived from the ENGLISH name of the competency (e.g. "incident-response", "stakeholder-alignment"), regardless of the output language. Keep them stable and unique.`;
+
+const COMPETENCY_PROMPT = `${SHARED_RULES}
+
+Produce 6 to 9 competencies for this role.
 - Derive them from what this role actually does. "Kubernetes troubleshooting under production pressure" is useful; "Communication" on its own is not.
 - Never invent requirements the job description does not support. If the description is thin, say less rather than padding it out.
 - Weight by how much the role depends on it: at most 3 "critical".
 - description: why this competency matters for this specific role.
 - strongLooks: one or two sentences on what a strong candidate demonstrates here.
 - positiveBehaviors, riskIndicators and exampleEvidence: 3-4 entries each, observable in an interview. Write what the candidate says or does, not personality traits.
-- levels: describe beginner / mid / senior performance in THIS role, in concrete terms a rater can distinguish.
+- levels: describe beginner / mid / senior performance in THIS role, in concrete terms a rater can distinguish.`;
 
-QUESTIONS — 10 to 14 of them.
-- Each question maps to exactly one competency via competencyId, and every competency gets at least one question.
+const QUESTION_PROMPT = `${SHARED_RULES}
+
+The competency framework for this role has already been settled and is given to you. Write 10 to 14 interview questions against it.
+- Each question maps to exactly one of the given competencies via competencyId. Use the ids exactly as given — do not invent new ones.
+- Every competency gets at least one question; the ones weighted "critical" deserve two.
 - Behavioural and past-experience based ("Tell me about a time..."), or a realistic situational scenario drawn from this role. No puzzles, no trivia, nothing answerable from a job ad.
 - why: what the question actually reveals.
 - strong: what a strong answer contains — specific, observable.
 - warning: the concrete signals of a weak or evasive answer.
-- followups: 2-3 probes that push for specifics.
-
-FAIRNESS — this is a hiring instrument.
-- Never reference or imply age, gender, ethnicity, religion, disability, pregnancy, family status, sexual orientation, or nationality.
-- No questions about personal life outside work.
-- Ask only about capabilities the job description supports.
-
-IDS — id is a lowercase ASCII slug derived from the ENGLISH name of the competency (e.g. "incident-response", "stakeholder-alignment"), regardless of the output language. Keep them stable and unique.`;
+- followups: 2-3 probes that push for specifics.`;
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -137,7 +155,8 @@ module.exports = async function handler(req, res) {
 
   const jd = typeof body.jd === 'string' ? body.jd.trim() : '';
   const lang = body.lang === 'sv' ? 'sv' : 'en';
-  const existing = Array.isArray(body.competencies) ? body.competencies.slice(0, 12) : [];
+  const stage = body.stage === 'questions' ? 'questions' : 'competencies';
+  const competencies = Array.isArray(body.competencies) ? body.competencies.slice(0, 12) : [];
 
   if (jd.length < MIN_JD_CHARS) {
     return res.status(400).json({ error: 'Job description too short', code: 'bad_request' });
@@ -145,13 +164,18 @@ module.exports = async function handler(req, res) {
   if (jd.length > MAX_JD_CHARS) {
     return res.status(413).json({ error: 'Job description too long', code: 'too_large' });
   }
+  if (stage === 'questions' && !competencies.length) {
+    return res.status(400).json({ error: 'Questions stage needs competencies', code: 'bad_request' });
+  }
 
   try {
-    const result = await generatePackage({ apiKey, jd, lang, existing });
+    const result = stage === 'questions'
+      ? await generateQuestions({ apiKey, jd, lang, competencies })
+      : await generateCompetencies({ apiKey, jd, lang, reuse: competencies });
     return res.status(200).json(result);
   } catch (e) {
     const status = e.status && e.status >= 400 && e.status < 600 ? e.status : 502;
-    console.error('generate failed:', e && e.message);
+    console.error(`generate(${stage}) failed:`, e && e.message);
     return res.status(status).json({
       error: e.message || 'Generation failed',
       code: e.code || 'generation_failed',
@@ -159,34 +183,28 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function generatePackage({ apiKey, jd, lang, existing }) {
-  const client = new Anthropic({ apiKey });
-
-  const language = lang === 'sv'
+function languageInstruction(lang) {
+  return lang === 'sv'
     ? 'Swedish (svenska). Use natural professional Swedish, not translated English.'
     : 'English.';
+}
 
-  const reuse = existing.length
-    ? `\n\nThis role has already been analysed. Reuse these competencies and their ids exactly — same set, same order, same ids — and write the text in ${language} Do not add, drop, or rename anything:\n${
-        existing.map(c => `- ${c.id}: ${c.name}`).join('\n')}`
-    : '';
+async function callClaude({ apiKey, system, prompt, schema }) {
+  const client = new Anthropic({ apiKey });
 
   const stream = client.beta.messages.stream({
     model: MODEL,
-    max_tokens: 32000,
-    system: SYSTEM_PROMPT,
+    max_tokens: 16000,
+    system,
     thinking: { type: 'adaptive' },
     output_config: {
       effort: 'medium',
-      format: { type: 'json_schema', schema: RESPONSE_SCHEMA },
+      format: { type: 'json_schema', schema },
     },
     // Rescue the request on the fallback model if a safety classifier declines
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    messages: [{
-      role: 'user',
-      content: `Write all human-readable text in ${language}\n\nJob description:\n\n<job_description>\n${jd}\n</job_description>${reuse}`,
-    }],
+    messages: [{ role: 'user', content: prompt }],
   });
 
   const message = await stream.finalMessage();
@@ -208,22 +226,85 @@ async function generatePackage({ apiKey, jd, lang, existing }) {
     .map(block => block.text)
     .join('');
 
-  let parsed;
   try {
-    parsed = JSON.parse(text);
+    return { parsed: JSON.parse(text), message };
   } catch (e) {
     const err = new Error('Model returned unparseable output');
     err.code = 'unparseable';
     throw err;
   }
+}
 
-  return normalize(parsed, message);
+async function generateCompetencies({ apiKey, jd, lang, reuse }) {
+  const language = languageInstruction(lang);
+
+  // Re-generating the same role in another language: keep the ids so the
+  // client's ratings and pinned evidence still line up.
+  const reuseBlock = reuse.length
+    ? `\n\nThis role has already been analysed. Reuse these competencies and their ids exactly — same set, same order, same ids — and write the text in ${language} Do not add, drop, or rename anything:\n${
+        reuse.map(c => `- ${c.id}: ${c.name}`).join('\n')}`
+    : '';
+
+  const { parsed, message } = await callClaude({
+    apiKey,
+    system: COMPETENCY_PROMPT,
+    schema: COMPETENCIES_SCHEMA,
+    prompt: `Write all human-readable text in ${language}\n\nJob description:\n\n<job_description>\n${jd}\n</job_description>${reuseBlock}`,
+  });
+
+  const competencies = normalizeCompetencies(parsed.competencies);
+  if (!competencies.length) {
+    const err = new Error('Model returned no usable competencies');
+    err.code = 'empty';
+    throw err;
+  }
+
+  return {
+    stage: 'competencies',
+    roleTitle: String(parsed.roleTitle || '').trim(),
+    seniority: parsed.seniority || 'unspecified',
+    competencies,
+    meta: usage(message),
+  };
+}
+
+async function generateQuestions({ apiKey, jd, lang, competencies }) {
+  const language = languageInstruction(lang);
+
+  const framework = competencies
+    .map(c => `- ${c.id} (${c.weight || 'medium'}): ${c.name}\n  ${c.description || ''}`)
+    .join('\n');
+
+  const { parsed, message } = await callClaude({
+    apiKey,
+    system: QUESTION_PROMPT,
+    schema: QUESTIONS_SCHEMA,
+    prompt: `Write all human-readable text in ${language}\n\nJob description:\n\n<job_description>\n${jd}\n</job_description>\n\nCompetency framework:\n\n<competencies>\n${framework}\n</competencies>`,
+  });
+
+  const validIds = new Set(competencies.map(c => slugify(c.id)));
+  const questions = normalizeQuestions(parsed.questions, validIds);
+  if (!questions.length) {
+    const err = new Error('Model returned no usable questions');
+    err.code = 'empty';
+    throw err;
+  }
+
+  return { stage: 'questions', questions, meta: usage(message) };
+}
+
+function usage(message) {
+  return {
+    model: message.model,
+    inputTokens: message.usage && message.usage.input_tokens,
+    outputTokens: message.usage && message.usage.output_tokens,
+  };
 }
 
 // Trust nothing: the schema constrains shape, not sanity.
-function normalize(parsed, message) {
+function normalizeCompetencies(list) {
   const seen = new Set();
-  const competencies = (parsed.competencies || [])
+  return (list || [])
     .map(c => {
       const id = slugify(c.id || c.name);
       if (!id || seen.has(id)) return null;
@@ -247,15 +328,10 @@ function normalize(parsed, message) {
     })
     .filter(c => c && c.name)
     .slice(0, 12);
+}
 
-  if (!competencies.length) {
-    const err = new Error('Model returned no usable competencies');
-    err.code = 'empty';
-    throw err;
-  }
-
-  const validIds = new Set(competencies.map(c => c.id));
-  const questions = (parsed.questions || [])
+function normalizeQuestions(list, validIds) {
+  return (list || [])
     .map(q => ({
       competencyId: slugify(q.competencyId),
       category: QUESTION_CATEGORIES.includes(q.category) ? q.category : 'competency',
@@ -265,27 +341,9 @@ function normalize(parsed, message) {
       warning: String(q.warning || '').trim(),
       followups: cleanList(q.followups),
     }))
-    // Drop questions pointing at a competency that did not survive
+    // Drop questions pointing at a competency the framework does not have
     .filter(q => q.question && validIds.has(q.competencyId))
     .slice(0, 20);
-
-  if (!questions.length) {
-    const err = new Error('Model returned no usable questions');
-    err.code = 'empty';
-    throw err;
-  }
-
-  return {
-    roleTitle: String(parsed.roleTitle || '').trim(),
-    seniority: parsed.seniority || 'unspecified',
-    competencies,
-    questions,
-    meta: {
-      model: message.model,
-      inputTokens: message.usage && message.usage.input_tokens,
-      outputTokens: message.usage && message.usage.output_tokens,
-    },
-  };
 }
 
 function cleanList(value) {

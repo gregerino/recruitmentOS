@@ -1,37 +1,36 @@
 // ══════════════════════════════════════════════════════════════
 //  AI — client for /api/generate
 //
-//  Every call is optional. The caller always holds the rule-based
-//  package from analyzer.js, so this never throws: it resolves to
-//  { ok: false, code } and the app carries on without it.
+//  Generation runs in two stages so the interviewer sees a usable
+//  kit at roughly the halfway mark: competencies first, questions
+//  after. Every call is optional — the caller always holds the
+//  rule-based package from analyzer.js, so this never throws: it
+//  resolves to { ok: false, code } and the app carries on.
 // ══════════════════════════════════════════════════════════════
 const AI = (() => {
   const ENDPOINT = '/api/generate';
   const TIMEOUT_MS = 240000;
 
-  let inFlight = null;
+  // Tracked separately: cancelling the competency stage (the user pressed
+  // "continue without AI") must not kill a questions call, and vice versa.
+  const inFlight = { competencies: null, questions: null };
 
-  function isGenerating() {
-    return !!inFlight;
+  function isGenerating(stage) {
+    if (stage) return !!inFlight[stage];
+    return !!(inFlight.competencies || inFlight.questions);
   }
 
-  // Abort a running generation — used by the "continue without AI" escape.
-  function cancel() {
-    if (inFlight) inFlight.abort();
+  function cancel(stage) {
+    const stages = stage ? [stage] : Object.keys(inFlight);
+    stages.forEach(key => {
+      if (inFlight[key]) inFlight[key].abort();
+    });
   }
 
-  /**
-   * @param jd            the job description text
-   * @param lang          'sv' | 'en'
-   * @param competencies  optional [{ id, name }] to reuse when re-generating
-   *                      the same role in another language, so ids stay stable
-   * @returns { ok: true, data } | { ok: false, code, error }
-   */
-  async function generate(jd, lang, competencies) {
-    cancel();
+  async function post(stage, body) {
+    cancel(stage);
     const controller = new AbortController();
-    inFlight = controller;
-
+    inFlight[stage] = controller;
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
@@ -39,20 +38,13 @@ const AI = (() => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({
-          jd,
-          lang,
-          competencies: (competencies || []).map(c => ({ id: c.id, name: c.name })),
-        }),
+        body: JSON.stringify({ ...body, stage }),
       });
 
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         return { ok: false, code: payload.code || httpCode(res.status), error: payload.error || `HTTP ${res.status}` };
-      }
-      if (!payload.competencies || !payload.competencies.length) {
-        return { ok: false, code: 'empty', error: 'No competencies returned' };
       }
       return { ok: true, data: payload };
 
@@ -61,8 +53,40 @@ const AI = (() => {
       return { ok: false, code: 'network', error: e.message || 'Network error' };
     } finally {
       clearTimeout(timer);
-      if (inFlight === controller) inFlight = null;
+      if (inFlight[stage] === controller) inFlight[stage] = null;
     }
+  }
+
+  /**
+   * Stage 1 — the competency framework.
+   * @param reuse  optional [{ id, name }] to reuse when re-generating the
+   *               same role in another language, so ids stay stable
+   */
+  async function generateCompetencies(jd, lang, reuse) {
+    const result = await post('competencies', {
+      jd,
+      lang,
+      competencies: (reuse || []).map(c => ({ id: c.id, name: c.name })),
+    });
+    if (result.ok && !(result.data.competencies || []).length) {
+      return { ok: false, code: 'empty', error: 'No competencies returned' };
+    }
+    return result;
+  }
+
+  /** Stage 2 — questions written against the settled framework. */
+  async function generateQuestions(jd, lang, competencies) {
+    const result = await post('questions', {
+      jd,
+      lang,
+      competencies: (competencies || []).map(c => ({
+        id: c.id, name: c.name, weight: c.weight, description: c.description,
+      })),
+    });
+    if (result.ok && !(result.data.questions || []).length) {
+      return { ok: false, code: 'empty', error: 'No questions returned' };
+    }
+    return result;
   }
 
   function httpCode(status) {
@@ -72,5 +96,5 @@ const AI = (() => {
     return 'generation_failed';
   }
 
-  return { generate, cancel, isGenerating };
+  return { generateCompetencies, generateQuestions, cancel, isGenerating };
 })();

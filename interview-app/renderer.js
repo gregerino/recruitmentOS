@@ -402,6 +402,12 @@ const Renderer = (() => {
 
       ${tipBox('s5Coach', 'coach')}
 
+      ${data.questionsPending ? `
+        <div class="questions-pending">
+          <span class="spinner-small"></span>
+          <span>${T.get('questionsPending')}</span>
+        </div>` : ''}
+
       <div class="interview-notes-panel interview-notes-sticky">
         <div class="notes-panel-header">
           <h3>📝 ${T.get('notesTitle')}</h3>

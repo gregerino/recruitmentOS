@@ -836,13 +836,6 @@
     if (!lastAnalysisData) return;
 
     const selected = lastAnalysisData.competencyLibrary.filter(c => c.selected);
-    const selectedIds = selected.map(c => c.id);
-
-    // Rebuild questions
-    const questions = Analyzer.buildQuestionsForSelection(
-      selectedIds, lastAnalysisData.analysis, T.getLang(), lastAnalysisData.ai);
-    lastAnalysisData.questions = questions;
-    Renderer.renderQuestions(lastAnalysisData);
 
     // Rebuild scorecard
     const scorecard = Analyzer.buildScorecardFromLibrary(selected, lastAnalysisData.analysis);
@@ -862,9 +855,9 @@
     scorecardScores = newScores;
     updateAutoRecommendation();
 
-    // Re-rendering the questions section recreates the notes panel, so
-    // put the interviewer's notes back before anything reads them.
-    applySessionContent(currentSession);
+    // Rebuilds the questions and repaints the section, putting the notes
+    // panel and transcription controls back afterwards.
+    rebuildQuestions();
 
     persistSelection();
     persistScores();
@@ -927,7 +920,8 @@
   // Runs the generation behind the loading screen, cycling the copy and
   // offering an escape hatch so a slow or missing endpoint never blocks
   // the interviewer from getting a kit.
-  async function runGeneration(text, lang, reuseCompetencies) {
+  // Stage 1 — the competency framework, behind the loading screen.
+  async function runCompetencyStage(text, lang, reuseCompetencies) {
     const steps = T.get('loadingAiSteps');
     let step = 0;
     setLoadingStatus(steps[0]);
@@ -948,15 +942,87 @@
     });
 
     try {
-      return await Promise.race([AI.generate(text, lang, reuseCompetencies), skipped]);
+      return await Promise.race([AI.generateCompetencies(text, lang, reuseCompetencies), skipped]);
     } finally {
       clearInterval(ticker);
-      AI.cancel();
+      AI.cancel('competencies');
       if (skipBtn) {
         skipBtn.removeEventListener('click', onSkip);
         skipBtn.style.display = 'none';
       }
     }
+  }
+
+  // Stage 2 — questions, fetched after the kit is already on screen.
+  // Latency scales with output volume, so waiting for both stages before
+  // rendering anything meant three minutes of blank loading screen.
+  async function startQuestionStage(text, lang) {
+    if (!lastAnalysisData || !lastAnalysisData.ai) return;
+
+    const competencies = lastAnalysisData.ai.competencies;
+    const sessionId = currentSession && currentSession.id;
+
+    questionsPending = true;
+    renderQuestionsSection();
+
+    const outcome = await AI.generateQuestions(text, lang, competencies);
+    questionsPending = false;
+
+    // The user may have moved on to another session or language while we
+    // were waiting — those results belong to a package that is gone.
+    const stillCurrent = lastAnalysisData
+      && lastAnalysisData.ai
+      && lastAnalysisData.ai.competencies === competencies
+      && (!sessionId || (currentSession && currentSession.id === sessionId))
+      && T.getLang() === lang;
+    if (!stillCurrent) return;
+
+    if (outcome.ok) {
+      lastAnalysisData.ai.questions = outcome.data.questions;
+      persist({ ai: { ...((currentSession && currentSession.ai) || {}), [lang]: lastAnalysisData.ai } });
+    } else if (outcome.code !== 'cancelled') {
+      // Keep the generated competencies, but fall back to the templated
+      // questions rather than leaving the section empty.
+      questionsFallback = true;
+      aiNotice = ['rate_limited', 'not_configured', 'unauthorized'].includes(outcome.code)
+        ? outcome.code
+        : 'questions_failed';
+      renderPackageBar();
+    }
+
+    rebuildQuestions();
+  }
+
+  // Re-derive the questions from the current selection and repaint the
+  // section. Re-rendering recreates the notes panel and the transcription
+  // controls, so both have to be put back.
+  function rebuildQuestions() {
+    if (!lastAnalysisData) return;
+    const selectedIds = lastAnalysisData.competencyLibrary.filter(c => c.selected).map(c => c.id);
+    lastAnalysisData.questions = Analyzer.buildQuestionsForSelection(
+      selectedIds, lastAnalysisData.analysis, T.getLang(),
+      questionsFallback ? null : lastAnalysisData.ai);
+    renderQuestionsSection();
+    buildEvidenceIndex();
+  }
+
+  function renderQuestionsSection() {
+    if (!lastAnalysisData) return;
+
+    // Autosave is debounced, so anything typed in the last fraction of a
+    // second is still only in the DOM — and re-rendering destroys the
+    // textarea. Capture it before that happens.
+    const liveNotes = document.getElementById('interview-notes');
+    if (liveNotes && currentSession) {
+      persist({ notes: liveNotes.value });
+      Store.flush();
+    }
+
+    lastAnalysisData.questionsPending = questionsPending;
+    Renderer.renderQuestions(lastAnalysisData);
+    applySessionContent(currentSession);
+    setupNotesCollapse();
+    initTranscribe();
   }
 
   // Any competencies we can hand back to keep ids stable across languages
@@ -987,6 +1053,8 @@
     const cached = restoreFrom && restoreFrom.ai && restoreFrom.ai[lang];
     let generated = null;
     aiNotice = null;
+    questionsPending = false;
+    questionsFallback = false;
 
     if (cached) {
       generated = cached;
@@ -998,11 +1066,16 @@
       const shouldGenerate = forceGeneration || !restoreFrom || !!reuse;
       forceGeneration = false;
       if (shouldGenerate) {
-        const outcome = await runGeneration(text, lang, reuse);
-        if (outcome.ok) generated = outcome.data;
+        const outcome = await runCompetencyStage(text, lang, reuse);
+        if (outcome.ok) generated = { ...outcome.data, questions: [] };
         else aiNotice = outcome.code;
       }
     }
+
+    // Stage 2 still owes us questions — either it has not run yet, or a
+    // cached package was saved before it finished.
+    const needsQuestions = !!generated && !(generated.questions || []).length;
+    questionsPending = needsQuestions;
 
     if (generated) data = Analyzer.applyAiPackage(data, generated, lang);
 
@@ -1071,6 +1144,8 @@
     persistScores();
     renderPackageBar();
     prepareEvidence(restoreFrom);
+
+    if (needsQuestions) startQuestionStage(text, lang);
   }
 
   // --- Landing Competency Library ---
@@ -1310,6 +1385,8 @@
 
   let aiNotice = null;
   let forceGeneration = false;
+  let questionsPending = false;
+  let questionsFallback = false;
 
   // Tells the user whether they are looking at a generated package or the
   // rule-based fallback, and why — an interview kit's provenance matters.
@@ -1330,7 +1407,7 @@
     else note.textContent = isAi ? T.get('packageAiNote') : T.get('packageRulesNote');
 
     button.textContent = T.get(aiNotice ? 'packageRetry' : 'packageGenerate');
-    button.style.display = isAi ? 'none' : '';
+    button.style.display = (isAi && !aiNotice) ? 'none' : '';
     bar.style.display = 'flex';
   }
 
@@ -1339,6 +1416,17 @@
     if (!button) return;
     button.addEventListener('click', async () => {
       if (!lastText || AI.isGenerating()) return;
+
+      // Only the questions failed — retry that stage alone rather than
+      // regenerating the competencies and discarding the ratings with them.
+      if (questionsFallback && lastAnalysisData && lastAnalysisData.ai) {
+        questionsFallback = false;
+        aiNotice = null;
+        renderPackageBar();
+        await startQuestionStage(lastText, T.getLang());
+        return;
+      }
+
       // Generating replaces the competencies, so any rating tied to the
       // old ones is lost. Say so before doing it.
       if (Object.keys(scorecardScores).length && !confirm(T.get('packageRegenerateWarning'))) return;

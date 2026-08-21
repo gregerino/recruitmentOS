@@ -551,6 +551,10 @@ const T = (() => {
       ],
     },
     loadingSkip: { en: 'Continue without AI', sv: 'Fortsätt utan AI' },
+    questionsPending: {
+      en: 'Writing questions for your competencies — the rest of the kit is ready to use meanwhile.',
+      sv: 'Skriver frågor för dina kompetenser — resten av paketet går att använda under tiden.',
+    },
 
     packageAi: { en: 'AI-generated', sv: 'AI-genererat' },
     packageRules: { en: 'Standard package', sv: 'Standardpaket' },
@@ -581,6 +585,7 @@ const T = (() => {
         too_large: 'The role description is too long to generate from.',
         cancelled: 'Generation skipped — showing the standard package.',
         generation_failed: 'AI generation failed — showing the standard package.',
+        questions_failed: 'The competencies were generated, but the questions were not — showing the standard questions.',
       },
       sv: {
         not_configured: 'AI-generering är inte konfigurerad på servern — visar standardpaketet.',
@@ -594,6 +599,7 @@ const T = (() => {
         too_large: 'Rollbeskrivningen är för lång för att generera från.',
         cancelled: 'Generering överhoppad — visar standardpaketet.',
         generation_failed: 'AI-genereringen misslyckades — visar standardpaketet.',
+        questions_failed: 'Kompetenserna genererades, men inte frågorna — visar standardfrågorna.',
       },
     },
   };

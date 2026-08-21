@@ -14,9 +14,13 @@ Deployed on Vercel with this directory as the project root.
 
 ## Endpoints
 
-- `POST /api/generate` — `{ jd, lang, competencies? }` → competency framework + questions.
-  Pass `competencies` (`[{ id, name }]`) to re-generate the same role in another language
-  while keeping the ids stable. Capped at 30 000 characters and 8 requests per minute per IP.
+- `POST /api/generate` — `{ jd, lang, stage, competencies? }`. Two stages:
+  - `stage: "competencies"` (default) → `{ roleTitle, seniority, competencies }`.
+    Pass `competencies` (`[{ id, name }]`) to re-generate the same role in another
+    language while keeping the ids stable.
+  - `stage: "questions"` → `{ questions }`, written against the `competencies` you pass in.
+
+  Capped at 30 000 characters and 12 requests per minute per IP.
 - `POST /api/transcribe-assembly` — multipart audio → diarized transcript.
 - `POST /api/transcribe` — multipart audio → plain transcript (Whisper).
 
@@ -29,5 +33,13 @@ psychometric frame rather than something to re-derive per role. Every failure pa
 no API key, network error, refusal, or the user pressing "Continue without AI" — leaves
 the rule-based package in place, and the badge above the content says which one is shown.
 
+Generation latency is proportional to output volume (~56 tokens/second), which is why it
+runs in two stages. Stage 1 returns the competencies and the app renders the whole kit
+immediately; stage 2 fetches the questions in the background and repaints that section
+when they arrive. If stage 2 fails, the generated competencies stay and the questions fall
+back to the template library — the action button then retries stage 2 alone, without
+regenerating the competencies or discarding any ratings.
+
 Generated packages are cached per language in the saved session (`store.js`), so switching
-language costs one extra generation the first time and nothing after that.
+language costs one extra generation the first time and nothing after that. A package cached
+with no questions (saved while stage 2 was still running) re-runs stage 2 on restore.
