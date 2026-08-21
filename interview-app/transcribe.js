@@ -44,6 +44,13 @@ function initTranscribe() {
     return document.getElementById('interview-notes');
   }
 
+  // Setting .value in code does not fire an input event, so autosave
+  // would never see transcribed text. Dispatch one explicitly.
+  function setNotesValue(textarea, value) {
+    textarea.value = value;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   function setStatus(status) {
     statusEl.style.display = 'flex';
     badgeEl.className = 'rec-badge ' + status;
@@ -256,14 +263,22 @@ function initTranscribe() {
       const textarea = getNotesTextarea();
       if (textarea && data.text) {
         // Replace live text with diarized version
-        textarea.value = textBeforeRecording
+        setNotesValue(textarea, textBeforeRecording
           ? textBeforeRecording + '\n\n' + data.text
-          : data.text;
+          : data.text);
         textarea.scrollTop = textarea.scrollHeight;
+      }
+      // Hand the speaker-labelled turns to the app so it can save them
+      // and match passages against the competencies.
+      if (window.RecruitmentOS && window.RecruitmentOS.onTranscript) {
+        window.RecruitmentOS.onTranscript(data);
       }
     } catch (e) {
       console.error('AssemblyAI error:', e);
-      // Keep the live text as fallback — don't overwrite it
+      // Keep the live text as fallback — don't overwrite it, but still
+      // make sure it gets saved
+      const textarea = getNotesTextarea();
+      if (textarea) textarea.dispatchEvent(new Event('input', { bubbles: true }));
     } finally {
       setStatus('idle');
       recBtn.disabled = false;

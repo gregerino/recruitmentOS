@@ -524,6 +524,18 @@ const Renderer = (() => {
 
       ${tipBox('s7Coach', 'coach')}
 
+      <div class="evidence-bar" id="evidence-bar">
+        <div class="evidence-bar-row">
+          <button class="btn-secondary btn-sm" id="find-evidence-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <span id="find-evidence-label">${T.get('evidenceFind')}</span>
+          </button>
+          <span class="evidence-status" id="evidence-status"></span>
+        </div>
+        <div class="evidence-speakers" id="evidence-speakers" style="display:none"></div>
+        <p class="evidence-disclaimer">${T.get('evidenceDisclaimer')}</p>
+      </div>
+
       <div id="scorecard-cards">
         ${scorecard.map((c) => `
           <div class="scorecard-row card" data-comp-name="${esc(c.name)}" data-comp-id="${esc(c.id)}" data-weight="${c.weight}">
@@ -537,6 +549,7 @@ const Renderer = (() => {
               </div>
               ${starRating(c.id)}
             </div>
+            <div class="evidence-slot" data-evidence-for="${esc(c.id)}"></div>
           </div>
         `).join('')}
       </div>
@@ -664,6 +677,50 @@ const Renderer = (() => {
     `;
   }
 
+  // ─── Evidence ───
+
+  function evidenceItem(compId, quote, kind, position) {
+    const strengthLabels = T.get('evidenceStrength');
+    const isPinned = kind === 'pinned';
+    const tag = isPinned
+      ? `<span class="ev-tag ev-tag-pinned">${T.get('evidencePinnedLabel')}</span>`
+      : `<span class="ev-tag ev-strength-${esc(quote.strength || 'weak')}">${esc(strengthLabels[quote.strength] || '')}</span>`;
+
+    const action = isPinned
+      ? `<button class="ev-btn" data-unpin-evidence="${esc(compId)}" data-ev-pos="${position}">${T.get('evidenceUnpin')}</button>`
+      : `<button class="ev-btn ev-btn-pin" data-pin-evidence="${esc(compId)}" data-ev-pos="${position}">${T.get('evidencePin')}</button>`;
+
+    return `
+      <div class="ev-item ev-${esc(kind)}">
+        <blockquote class="ev-quote">${esc(quote.text)}</blockquote>
+        <div class="ev-meta">
+          ${tag}
+          ${quote.speaker ? `<span class="ev-speaker">${esc(quote.speaker)}</span>` : ''}
+          ${action}
+        </div>
+      </div>`;
+  }
+
+  // Contents of one competency's evidence slot: pinned quotes first,
+  // then whatever the transcript search suggested. Competencies without
+  // a match render nothing — the status line reports the totals.
+  function evidenceSlotHTML(compId, pinned, suggestions) {
+    const pins = pinned || [];
+    const sugs = (suggestions || []).filter(sg => !pins.some(p => p.text === sg.text));
+
+    if (!pins.length && !sugs.length) return '';
+
+    return `
+      ${pins.length ? `<div class="ev-group">
+        <div class="ev-group-label">${T.get('evidenceTitle')}</div>
+        ${pins.map((q, i) => evidenceItem(compId, q, 'pinned', i)).join('')}
+      </div>` : ''}
+      ${sugs.length ? `<div class="ev-group ev-group-suggestions">
+        <div class="ev-group-label">${T.get('evidenceSuggestions')}</div>
+        ${sugs.map((q, i) => evidenceItem(compId, q, 'suggestion', i)).join('')}
+      </div>` : ''}`;
+  }
+
   function esc(str) {
     if (!str) return '';
     const div = document.createElement('div');
@@ -691,5 +748,6 @@ const Renderer = (() => {
     renderScorecard(data) { document.getElementById('section-scorecard').innerHTML = renderScorecard(data); },
     renderCompetencyLibrary(data) { document.getElementById('section-competency-library').innerHTML = renderCompetencyLibrary(data); },
     renderCompetencyLibraryHTML(data) { return renderCompetencyLibrary(data); },
+    evidenceSlotHTML,
   };
 })();

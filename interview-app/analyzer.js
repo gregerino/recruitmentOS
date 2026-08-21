@@ -1232,18 +1232,27 @@ const Analyzer = (() => {
 
     return selectedEntries.map(entry => {
       const cat = entry.category;
-      let weight;
+      // Generated competencies come with their own weighting; the
+      // rule-based ones fall back to the category heuristic.
+      let weight = entry.weight;
+      if (!weight) {
       if (cat === 'technical') weight = isTechRole ? 'critical' : 'medium';
       else if (cat === 'behavioral') weight = 'high';
       else if (cat === 'leadership') weight = analysis.leadership.level === 'high' ? 'critical' : 'high';
       else if (cat === 'communication') weight = 'medium';
       else weight = 'high';
+      }
       return { id: entry.id, name: entry.name, category: cat, weight };
     });
   }
 
   // Build questions filtered by selected competency IDs
-  function buildQuestionsForSelection(selectedIds, analysis, lang) {
+  /**
+   * @param aiPackage  optional generated package — when present its
+   *                   questions replace the templated role questions,
+   *                   while the Big Five set stays rule-based.
+   */
+  function buildQuestionsForSelection(selectedIds, analysis, lang, aiPackage) {
     if (lang) _lang = lang;
     const allQuestions = buildQuestions(analysis);
 
@@ -1271,6 +1280,8 @@ const Analyzer = (() => {
     // Filter bigFive questions by selected traits (remove all if none selected)
     allQuestions.bigFive = allQuestions.bigFive.filter(q => selectedTraits.has(q.trait));
 
+    if (aiPackage) return mergeAiQuestions(aiPackage, selectedIds, allQuestions.bigFive);
+
     // Filter technical questions
     if (!hasTech) {
       allQuestions.technical = allQuestions.technical.filter(q => {
@@ -1281,6 +1292,90 @@ const Analyzer = (() => {
     }
 
     return allQuestions;
+  }
+
+  // ══════════════════════════════════════
+  //  GENERATED PACKAGES
+  // ══════════════════════════════════════
+
+  // Generated questions are already tied to a competency, so the display
+  // category is the competency name rather than a templated bucket label.
+  function mergeAiQuestions(aiPackage, selectedIds, bigFiveQuestions) {
+    const selected = new Set(selectedIds);
+    const nameById = new Map((aiPackage.competencies || []).map(c => [c.id, c.name]));
+    const buckets = { competency: [], situational: [], technical: [], culture: [] };
+
+    (aiPackage.questions || []).forEach(q => {
+      if (!selected.has(q.competencyId)) return;
+      const bucket = buckets[q.category] || buckets.competency;
+      bucket.push({
+        q: q.question,
+        why: q.why,
+        strong: q.strong,
+        warning: q.warning,
+        followups: q.followups || [],
+        category: nameById.get(q.competencyId) || '',
+        competencyId: q.competencyId,
+      });
+    });
+
+    return { ...buckets, bigFive: bigFiveQuestions };
+  }
+
+  /**
+   * Folds a generated package into the shapes the renderer already
+   * consumes. The Big Five competencies stay rule-based — they are a
+   * fixed psychometric frame, not something to re-derive per role.
+   */
+  function applyAiPackage(data, aiPackage, lang) {
+    if (lang) _lang = lang;
+
+    const bigFiveEntries = (data.competencyLibrary || []).filter(c => c.source === 'bigFive');
+
+    const aiEntries = (aiPackage.competencies || []).map(c => ({
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      category: c.category,
+      weight: c.weight,
+      source: 'ai',
+      selected: true,
+      levels: c.levels,
+      strongLooks: c.strongLooks,
+      positiveBehaviors: c.positiveBehaviors || [],
+      riskIndicators: c.riskIndicators || [],
+      exampleEvidence: c.exampleEvidence || [],
+      evaluationCriteria: generateCriteria(c.name),
+    }));
+
+    // The Competency Analysis section reads this grouped shape
+    const grouped = { technical: [], behavioral: [], leadership: [], communication: [], problemSolving: [] };
+    (aiPackage.competencies || []).forEach(c => {
+      (grouped[c.category] || grouped.behavioral).push({
+        name: c.name,
+        why: c.description,
+        strongLooks: c.strongLooks,
+        observable: c.positiveBehaviors || [],
+      });
+    });
+
+    const merged = {
+      ...data,
+      source: 'ai',
+      ai: aiPackage,
+      competencies: grouped,
+      competencyLibrary: [...aiEntries, ...bigFiveEntries],
+      analysis: aiPackage.roleTitle
+        ? { ...data.analysis, title: aiPackage.roleTitle }
+        : data.analysis,
+    };
+
+    const selected = merged.competencyLibrary.filter(c => c.selected);
+    merged.questions = buildQuestionsForSelection(
+      selected.map(c => c.id), merged.analysis, _lang, aiPackage);
+    merged.scorecard = buildScorecardFromLibrary(selected, merged.analysis);
+
+    return merged;
   }
 
   // ══════════════════════════════════════
@@ -1315,7 +1410,7 @@ const Analyzer = (() => {
     const followUps = buildFollowUps();
     const scorecard = buildScorecardFromLibrary(competencyLibrary.filter(c => c.selected), analysis);
 
-    return { analysis, competencies, competencyLibrary, bigFive, questions, followUps, scorecard };
+    return { analysis, competencies, competencyLibrary, bigFive, questions, followUps, scorecard, source: 'rules' };
   }
 
   // Build a standalone default library with only Big Five competencies (no analysis needed)
@@ -1351,11 +1446,53 @@ const Analyzer = (() => {
     }));
   }
 
+  // ══════════════════════════════════════
+  //  SCORING
+  // ══════════════════════════════════════
+
+  const WEIGHT_VALUES = { critical: 3, high: 2, medium: 1 };
+
+  // Single source of truth for the weighted score and the hire level it
+  // maps to — used by the scorecard, the floating panel and the
+  // candidate comparison so they can never drift apart.
+  function computeRecommendation(scorecard, scores) {
+    const rows = scorecard || [];
+    const given = scores || {};
+    let weightedSum = 0;
+    let weightTotal = 0;
+    let scored = 0;
+
+    rows.forEach(row => {
+      const val = given[row.id];
+      if (val === undefined) return;
+      const w = WEIGHT_VALUES[row.weight] || 1;
+      weightedSum += val * w;
+      weightTotal += w;
+      scored++;
+    });
+
+    if (!scored) {
+      return { avg: 0, levelKey: null, levelClass: null, scored: 0, total: rows.length };
+    }
+
+    const avg = weightedSum / weightTotal;
+    let levelKey, levelClass;
+    if (avg >= 4.5) { levelKey = 'strongHire'; levelClass = 'strong-hire'; }
+    else if (avg >= 3.5) { levelKey = 'hire'; levelClass = 'hire'; }
+    else if (avg >= 2.8) { levelKey = 'leanHire'; levelClass = 'lean-hire'; }
+    else if (avg >= 2.0) { levelKey = 'leanNo'; levelClass = 'lean-no'; }
+    else { levelKey = 'noHire'; levelClass = 'no-hire'; }
+
+    return { avg, levelKey, levelClass, scored, total: rows.length };
+  }
+
   return {
     analyze,
     buildDefaultLibrary,
     buildQuestionsForSelection,
     buildScorecardFromLibrary,
+    applyAiPackage,
+    computeRecommendation,
     setLang(lang) { _lang = lang; },
   };
 })();

@@ -179,6 +179,14 @@
 
   // --- New Analysis ---
   newBtn.addEventListener('click', () => {
+    // The session stays in the archive — we just stop editing it
+    Store.flush();
+    Store.setCurrent(null);
+    currentSession = null;
+    lastAnalysisData = null;
+    lastText = '';
+    updateSavedCount();
+
     showPage('landing');
     showFloatingToggle(false);
     document.getElementById('floating-scorecard')?.classList.remove('open');
@@ -220,8 +228,9 @@
     });
   }
 
-  function switchLanguage(lang) {
+  async function switchLanguage(lang) {
     T.setLang(lang);
+    persist({ lang });
 
     // Sync all toggle buttons
     document.querySelectorAll('.lang-btn').forEach(btn => {
@@ -244,27 +253,18 @@
     Analyzer.setLang(lang);
     renderLandingLibrary();
 
-    // Re-analyze and re-render results if we have data
+    // Rebuild the results in the new language. runAnalysis() already knows
+    // how to reuse the generated package, carry the selection across the
+    // id change, and restore scores, notes and evidence — so go through it
+    // rather than keeping a second, near-identical path here.
     if (lastAnalysisData && lastText) {
-      const data = Analyzer.analyze(lastText, lang);
-      lastAnalysisData = data;
-      document.getElementById('role-title-header').textContent = data.analysis.title;
-      Renderer.renderAll(data);
-      setupScrollSpy();
-      setupResultsInteractivity(true);
-      // Restore star scores
-      Object.entries(scorecardScores).forEach(([row, val]) => {
-        const rating = document.querySelector(`.star-rating[data-row="${row}"]`);
-        if (rating) {
-          rating.querySelectorAll('.star').forEach(s => {
-            s.classList.toggle('active', parseInt(s.dataset.value) <= val);
-          });
-          const labels = T.get('starLabels');
-          const label = rating.querySelector('.star-label');
-          if (label) label.textContent = labels[val - 1];
-        }
-      });
-      updateAutoRecommendation();
+      Store.flush();
+      if (currentSession) {
+        currentSession.lang = lang;
+        await runAnalysis(lastText, currentSession);
+      } else {
+        await runAnalysis(lastText);
+      }
     }
   }
 
@@ -457,6 +457,7 @@
       }
 
       updateAutoRecommendation();
+      persistScores();
     });
   }
 
@@ -472,11 +473,10 @@
     const fillMsg = document.querySelector('.auto-rec-fill-msg');
     if (!recResult || !recLevel || !recAvg) return;
 
-    const rows = document.querySelectorAll('.scorecard-row');
-    const totalRows = rows.length;
-    const scoredRows = Object.keys(scorecardScores).length;
+    const { avg, levelKey, levelClass } = Analyzer.computeRecommendation(
+      lastAnalysisData ? lastAnalysisData.scorecard : [], scorecardScores);
 
-    if (scoredRows === 0) {
+    if (!levelKey) {
       recResult.style.display = 'none';
       if (fillMsg) fillMsg.style.display = '';
       document.querySelectorAll('.rec-card').forEach(c => c.classList.remove('rec-active'));
@@ -484,30 +484,7 @@
       return;
     }
 
-    // Calculate weighted average
-    let weightedSum = 0;
-    let weightTotal = 0;
-    const weightMap = { critical: 3, high: 2, medium: 1 };
-
-    rows.forEach((row) => {
-      const compId = row.dataset.compId;
-      if (scorecardScores[compId] !== undefined) {
-        const w = weightMap[row.dataset.weight] || 1;
-        weightedSum += scorecardScores[compId] * w;
-        weightTotal += w;
-      }
-    });
-
-    const avg = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
     const levels = T.get('autoRecLevels');
-
-    let levelKey, levelClass;
-    if (avg >= 4.5) { levelKey = 'strongHire'; levelClass = 'strong-hire'; }
-    else if (avg >= 3.5) { levelKey = 'hire'; levelClass = 'hire'; }
-    else if (avg >= 2.8) { levelKey = 'leanHire'; levelClass = 'lean-hire'; }
-    else if (avg >= 2.0) { levelKey = 'leanNo'; levelClass = 'lean-no'; }
-    else { levelKey = 'noHire'; levelClass = 'no-hire'; }
-
     recLevel.textContent = levels[levelKey];
     recLevel.className = 'auto-rec-level ' + levelClass;
     recAvg.textContent = avg.toFixed(1);
@@ -776,33 +753,15 @@
     const footer = document.getElementById('floating-scorecard-footer');
     if (!footer) return;
 
-    const scoredCount = Object.keys(scorecardScores).length;
-    if (scoredCount === 0) {
+    const { avg, levelKey, levelClass } = Analyzer.computeRecommendation(
+      lastAnalysisData ? lastAnalysisData.scorecard : [], scorecardScores);
+
+    if (!levelKey) {
       footer.innerHTML = `<div class="floating-rec-empty" data-t="autoRecFill">${T.get('autoRecFill')}</div>`;
       return;
     }
 
-    const rows = document.querySelectorAll('.scorecard-row');
-    const weightMap = { critical: 3, high: 2, medium: 1 };
-    let weightedSum = 0, weightTotal = 0;
-
-    rows.forEach((row) => {
-      const compId = row.dataset.compId;
-      if (scorecardScores[compId] !== undefined) {
-        const w = weightMap[row.dataset.weight] || 1;
-        weightedSum += scorecardScores[compId] * w;
-        weightTotal += w;
-      }
-    });
-
-    const avg = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
     const levels = T.get('autoRecLevels');
-    let levelKey, levelClass;
-    if (avg >= 4.5) { levelKey = 'strongHire'; levelClass = 'strong-hire'; }
-    else if (avg >= 3.5) { levelKey = 'hire'; levelClass = 'hire'; }
-    else if (avg >= 2.8) { levelKey = 'leanHire'; levelClass = 'lean-hire'; }
-    else if (avg >= 2.0) { levelKey = 'leanNo'; levelClass = 'lean-no'; }
-    else { levelKey = 'noHire'; levelClass = 'no-hire'; }
 
     footer.innerHTML = `
       <div class="floating-rec-summary">
@@ -880,7 +839,8 @@
     const selectedIds = selected.map(c => c.id);
 
     // Rebuild questions
-    const questions = Analyzer.buildQuestionsForSelection(selectedIds, lastAnalysisData.analysis, T.getLang());
+    const questions = Analyzer.buildQuestionsForSelection(
+      selectedIds, lastAnalysisData.analysis, T.getLang(), lastAnalysisData.ai);
     lastAnalysisData.questions = questions;
     Renderer.renderQuestions(lastAnalysisData);
 
@@ -901,6 +861,15 @@
     });
     scorecardScores = newScores;
     updateAutoRecommendation();
+
+    // Re-rendering the questions section recreates the notes panel, so
+    // put the interviewer's notes back before anything reads them.
+    applySessionContent(currentSession);
+
+    persistSelection();
+    persistScores();
+    if (evidenceSearched) runEvidenceSearch();
+    else renderEvidenceSlots();
   }
 
   // --- Notes collapse toggle ---
@@ -926,33 +895,145 @@
     }
   }
 
-  async function runAnalysis(text) {
-    showPage('loading');
-    const statusEl = document.getElementById('loading-status');
-    const loadingMessages = T.get('loadingSteps');
+  // Rule-based competency ids are slugs of the translated names, so they
+  // change with the language. When a saved selection matches none of the
+  // freshly built ids, fall back to matching by position instead.
+  function buildIdRemap(session, library) {
+    const savedSelection = (session && session.selectedCompIds) || [];
+    const savedLibrary = (session && session.libraryIds) || [];
+    if (!savedSelection.length) return null;
 
+    const libraryIds = library.map(c => c.id);
+    if (savedSelection.some(id => libraryIds.includes(id))) return null;
+    if (savedLibrary.length !== libraryIds.length) return null;
+
+    const map = {};
+    savedLibrary.forEach((id, i) => { map[id] = libraryIds[i]; });
+    return map;
+  }
+
+  function remapKeys(obj, idMap) {
+    return Object.entries(obj || {}).reduce((out, [id, val]) => {
+      out[(idMap && idMap[id]) || id] = val;
+      return out;
+    }, {});
+  }
+
+  function setLoadingStatus(text) {
+    const el = document.getElementById('loading-status');
+    if (el) el.textContent = text;
+  }
+
+  // Runs the generation behind the loading screen, cycling the copy and
+  // offering an escape hatch so a slow or missing endpoint never blocks
+  // the interviewer from getting a kit.
+  async function runGeneration(text, lang, reuseCompetencies) {
+    const steps = T.get('loadingAiSteps');
+    let step = 0;
+    setLoadingStatus(steps[0]);
+    const ticker = setInterval(() => {
+      step = Math.min(step + 1, steps.length - 1);
+      setLoadingStatus(steps[step]);
+    }, 6000);
+
+    const skipBtn = document.getElementById('loading-skip');
+    let onSkip = null;
+    const skipped = new Promise(resolve => {
+      onSkip = () => resolve({ ok: false, code: 'cancelled' });
+      if (skipBtn) {
+        skipBtn.textContent = T.get('loadingSkip');
+        skipBtn.style.display = '';
+        skipBtn.addEventListener('click', onSkip);
+      }
+    });
+
+    try {
+      return await Promise.race([AI.generate(text, lang, reuseCompetencies), skipped]);
+    } finally {
+      clearInterval(ticker);
+      AI.cancel();
+      if (skipBtn) {
+        skipBtn.removeEventListener('click', onSkip);
+        skipBtn.style.display = 'none';
+      }
+    }
+  }
+
+  // Any competencies we can hand back to keep ids stable across languages
+  function reusableCompetencies(session) {
+    const cache = (session && session.ai) || {};
+    const any = Object.values(cache)[0];
+    return any ? any.competencies : null;
+  }
+
+  /**
+   * @param text         the job description to analyse
+   * @param restoreFrom  a saved session to rehydrate into the result,
+   *                     or undefined to start a new one
+   */
+  async function runAnalysis(text, restoreFrom) {
+    showPage('loading');
+    const lang = T.getLang();
+
+    const loadingMessages = T.get('loadingSteps');
     for (let i = 0; i < loadingMessages.length; i++) {
-      statusEl.textContent = loadingMessages[i];
-      await sleep(300 + Math.random() * 200);
+      setLoadingStatus(loadingMessages[i]);
+      await sleep(restoreFrom ? 40 : 220 + Math.random() * 160);
     }
 
-    const data = Analyzer.analyze(text, T.getLang());
+    let data = Analyzer.analyze(text, lang);
 
-    // Carry over B5 pre-selections from landing page
-    if (preSelectedB5.size > 0) {
+    // ── Generated package: from cache, freshly requested, or skipped ──
+    const cached = restoreFrom && restoreFrom.ai && restoreFrom.ai[lang];
+    let generated = null;
+    aiNotice = null;
+
+    if (cached) {
+      generated = cached;
+    } else {
+      // On restore, only regenerate when this role already has a generated
+      // package in another language — never silently re-bill a rule-based
+      // session the user chose to keep.
+      const reuse = reusableCompetencies(restoreFrom);
+      const shouldGenerate = forceGeneration || !restoreFrom || !!reuse;
+      forceGeneration = false;
+      if (shouldGenerate) {
+        const outcome = await runGeneration(text, lang, reuse);
+        if (outcome.ok) generated = outcome.data;
+        else aiNotice = outcome.code;
+      }
+    }
+
+    if (generated) data = Analyzer.applyAiPackage(data, generated, lang);
+
+    // ── Competency selection ──
+    const idMap = buildIdRemap(restoreFrom, data.competencyLibrary);
+    const savedSelection = restoreFrom && restoreFrom.selectedCompIds;
+
+    if (savedSelection) {
+      const selected = new Set(savedSelection.map(id => (idMap && idMap[id]) || id));
+      const known = new Set((restoreFrom.libraryIds || []).map(id => (idMap && idMap[id]) || id));
       data.competencyLibrary.forEach(c => {
-        if (c.source === 'bigFive' && preSelectedB5.has(c.id)) {
-          c.selected = true;
-        }
+        // A competency the saved selection never saw — the package was
+        // regenerated since — starts selected rather than silently hidden.
+        c.selected = selected.has(c.id) || !known.has(c.id);
       });
-      // Rebuild questions & scorecard to reflect pre-selections
+    } else if (preSelectedB5.size > 0) {
+      // Carry over B5 pre-selections from landing page
+      data.competencyLibrary.forEach(c => {
+        if (c.source === 'bigFive' && preSelectedB5.has(c.id)) c.selected = true;
+      });
+    }
+
+    if (savedSelection || preSelectedB5.size > 0) {
       const selected = data.competencyLibrary.filter(c => c.selected);
-      const selectedIds = selected.map(c => c.id);
-      data.questions = Analyzer.buildQuestionsForSelection(selectedIds, data.analysis, T.getLang());
+      data.questions = Analyzer.buildQuestionsForSelection(
+        selected.map(c => c.id), data.analysis, lang, data.ai);
       data.scorecard = Analyzer.buildScorecardFromLibrary(selected, data.analysis);
     }
 
     lastAnalysisData = data;
+    lastText = text;
 
     document.getElementById('role-title-header').textContent = data.analysis.title;
     Renderer.renderAll(data);
@@ -963,6 +1044,33 @@
 
     setupScrollSpy();
     setupResultsInteractivity();
+
+    if (restoreFrom) {
+      currentSession = restoreFrom;
+      // setupResultsInteractivity() cleared the scores, so refill after it
+      scorecardScores = remapKeys(restoreFrom.scores, idMap);
+      currentSession.evidence = remapKeys(restoreFrom.evidence, idMap);
+      Object.entries(scorecardScores).forEach(([compId, val]) => syncStarRow(compId, val));
+      applySessionContent(restoreFrom);
+      updateAutoRecommendation();
+    } else {
+      currentSession = Store.create({
+        role: data.analysis.title,
+        lang,
+        jdText: text,
+        preSelectedB5: [...preSelectedB5],
+      });
+      const nameInput = document.getElementById('candidate-name');
+      if (nameInput) nameInput.value = '';
+    }
+
+    if (generated) {
+      persist({ ai: { ...((currentSession && currentSession.ai) || {}), [lang]: generated } });
+    }
+    persistSelection();
+    persistScores();
+    renderPackageBar();
+    prepareEvidence(restoreFrom);
   }
 
   // --- Landing Competency Library ---
@@ -1007,6 +1115,504 @@
     });
   }
 
+  // ══════════════════════════════════════
+  //  Session persistence
+  // ══════════════════════════════════════
+
+  let currentSession = null;
+  let saveIndicatorTimer = null;
+
+  function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str === undefined || str === null ? '' : String(str);
+    return div.innerHTML;
+  }
+
+  // The comparison view only needs the shape of the scorecard, not the
+  // full library entry behind it.
+  function snapshotScorecard(scorecard) {
+    return (scorecard || []).map(c => ({ id: c.id, name: c.name, category: c.category, weight: c.weight }));
+  }
+
+  function flashSaved() {
+    const el = document.getElementById('save-indicator');
+    if (!el || !Store.enabled) return;
+    el.textContent = T.get('savedIndicator');
+    el.classList.add('visible');
+    clearTimeout(saveIndicatorTimer);
+    saveIndicatorTimer = setTimeout(() => el.classList.remove('visible'), 1600);
+  }
+
+  function persist(fields) {
+    if (!currentSession) return;
+    Store.patch(fields);
+    flashSaved();
+  }
+
+  function persistScores() {
+    if (!lastAnalysisData) return;
+    const rec = Analyzer.computeRecommendation(lastAnalysisData.scorecard, scorecardScores);
+    persist({
+      scores: { ...scorecardScores },
+      scorecard: snapshotScorecard(lastAnalysisData.scorecard),
+      recommendation: rec.levelKey ? { levelKey: rec.levelKey, avg: rec.avg, scored: rec.scored, total: rec.total } : null,
+    });
+  }
+
+  function persistSelection() {
+    if (!lastAnalysisData) return;
+    persist({
+      selectedCompIds: lastAnalysisData.competencyLibrary.filter(c => c.selected).map(c => c.id),
+      libraryIds: lastAnalysisData.competencyLibrary.map(c => c.id),
+      scorecard: snapshotScorecard(lastAnalysisData.scorecard),
+      source: lastAnalysisData.source,
+    });
+  }
+
+  function collectTemplate() {
+    const values = {};
+    const edited = [];
+    document.querySelectorAll('#section-summary-template .template-textarea').forEach(ta => {
+      const idx = ta.dataset.sectionIndex;
+      if (idx === undefined) return;
+      if (ta.value.trim()) values[idx] = ta.value;
+      if (ta.dataset.userEdited) edited.push(idx);
+    });
+    return { template: values, templateEdited: edited };
+  }
+
+  // Put the human-entered parts of a session back into the freshly
+  // rendered DOM. The analysis itself is deterministic, so it is
+  // rebuilt from the job description rather than stored.
+  function applySessionContent(session) {
+    if (!session) return;
+
+    const notes = document.getElementById('interview-notes');
+    if (notes && session.notes) notes.value = session.notes;
+
+    const edited = new Set(session.templateEdited || []);
+    Object.entries(session.template || {}).forEach(([idx, val]) => {
+      const ta = document.querySelector(`#section-summary-template .template-textarea[data-section-index="${idx}"]`);
+      if (!ta) return;
+      ta.value = val;
+      if (edited.has(idx)) ta.dataset.userEdited = 'true';
+    });
+
+    const nameInput = document.getElementById('candidate-name');
+    if (nameInput) nameInput.value = session.candidate || '';
+  }
+
+  function setupPersistence() {
+    const indicator = document.getElementById('save-indicator');
+    if (!Store.enabled) {
+      if (indicator) {
+        indicator.textContent = T.get('storageUnavailable');
+        indicator.classList.add('visible', 'save-indicator-warn');
+      }
+      return;
+    }
+
+    const nameInput = document.getElementById('candidate-name');
+    if (nameInput) {
+      nameInput.addEventListener('input', () => persist({ candidate: nameInput.value }));
+    }
+
+    // The notes and template fields are re-created on every render,
+    // so listen at the document level.
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'interview-notes') {
+        persist({ notes: e.target.value });
+      } else if (e.target.classList.contains('template-textarea')) {
+        persist(collectTemplate());
+      }
+    });
+  }
+
+  function setupResumeBanner() {
+    const banner = document.getElementById('resume-banner');
+    if (!banner) return;
+
+    const session = Store.current();
+    if (!session || !Store.isResumable(session)) return;
+
+    const desc = document.getElementById('resume-desc');
+    if (desc) {
+      const who = (session.candidate || '').trim();
+      desc.textContent = [
+        T.get('resumeDesc').replace('{role}', session.role || '—'),
+        who,
+        T.relativeTime(session.updatedAt),
+      ].filter(Boolean).join(' · ');
+    }
+
+    banner.dataset.sessionId = session.id;
+    banner.style.display = 'flex';
+  }
+
+  function setupSessionUi() {
+    const banner = document.getElementById('resume-banner');
+    const resumeBtn = document.getElementById('resume-btn');
+    const discardBtn = document.getElementById('resume-discard-btn');
+
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', () => {
+        const id = banner ? banner.dataset.sessionId : null;
+        const session = id ? Store.get(id) : null;
+        if (banner) banner.style.display = 'none';
+        if (session) restoreSession(session);
+      });
+    }
+
+    if (discardBtn) {
+      discardBtn.addEventListener('click', () => {
+        if (banner) banner.style.display = 'none';
+        Store.setCurrent(null);
+      });
+    }
+  }
+
+  function restoreSession(session) {
+    if (!session || !session.jdText) return;
+
+    Store.setCurrent(session.id);
+
+    const lang = session.lang || T.getLang();
+    if (lang !== T.getLang()) {
+      T.setLang(lang);
+      Analyzer.setLang(lang);
+      document.documentElement.lang = lang;
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === lang);
+      });
+      updateLandingText();
+      updateSidebarNav();
+      updatePhaseLabels();
+    }
+
+    preSelectedB5 = new Set(session.preSelectedB5 || []);
+    textarea.value = session.jdText;
+    updateCharCount();
+    runAnalysis(session.jdText, session);
+  }
+
+  function updateSavedCount() {
+    const btn = document.getElementById('saved-sessions-btn');
+    if (!btn) return;
+    const count = Store.list().length;
+    btn.style.display = count ? 'inline-flex' : 'none';
+    const badge = document.getElementById('saved-count');
+    if (badge) badge.textContent = count;
+  }
+
+  // ══════════════════════════════════════
+  //  Package source
+  // ══════════════════════════════════════
+
+  let aiNotice = null;
+  let forceGeneration = false;
+
+  // Tells the user whether they are looking at a generated package or the
+  // rule-based fallback, and why — an interview kit's provenance matters.
+  function renderPackageBar() {
+    const bar = document.getElementById('package-bar');
+    const badge = document.getElementById('package-badge');
+    const note = document.getElementById('package-note');
+    const button = document.getElementById('package-generate');
+    if (!bar || !badge || !note || !button) return;
+
+    const isAi = !!(lastAnalysisData && lastAnalysisData.source === 'ai');
+    const notices = T.get('aiNotices');
+
+    badge.className = 'package-badge ' + (isAi ? 'package-badge-ai' : 'package-badge-rules');
+    badge.textContent = T.get(isAi ? 'packageAi' : 'packageRules');
+
+    if (aiNotice) note.textContent = notices[aiNotice] || notices.generation_failed;
+    else note.textContent = isAi ? T.get('packageAiNote') : T.get('packageRulesNote');
+
+    button.textContent = T.get(aiNotice ? 'packageRetry' : 'packageGenerate');
+    button.style.display = isAi ? 'none' : '';
+    bar.style.display = 'flex';
+  }
+
+  function setupPackageBar() {
+    const button = document.getElementById('package-generate');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      if (!lastText || AI.isGenerating()) return;
+      // Generating replaces the competencies, so any rating tied to the
+      // old ones is lost. Say so before doing it.
+      if (Object.keys(scorecardScores).length && !confirm(T.get('packageRegenerateWarning'))) return;
+      Store.flush();
+      forceGeneration = true;
+      await runAnalysis(lastText, currentSession || undefined);
+    });
+  }
+
+  // ══════════════════════════════════════
+  //  Evidence extraction
+  // ══════════════════════════════════════
+
+  let evidenceIndex = null;
+  let evidenceSuggestions = {};
+  let evidenceSearched = false;
+  let evidenceSpeakers = [];
+  let candidateSpeaker = null;
+
+  // Only competencies that actually made it onto the scorecard.
+  function selectedLibraryEntries() {
+    if (!lastAnalysisData) return [];
+    const ids = new Set((lastAnalysisData.scorecard || []).map(c => c.id));
+    return (lastAnalysisData.competencyLibrary || []).filter(c => ids.has(c.id));
+  }
+
+  function buildEvidenceIndex() {
+    const comps = selectedLibraryEntries();
+    if (!comps.length) {
+      evidenceIndex = null;
+      return;
+    }
+    const analysis = (lastAnalysisData && lastAnalysisData.analysis) || {};
+    const ai = (lastAnalysisData && lastAnalysisData.ai) || null;
+    const hints = Evidence.buildHints(comps, {
+      responsibilities: analysis.responsibilities || [],
+      questions: ai ? ai.questions : [],
+    });
+    evidenceIndex = Evidence.buildIndex(comps, hints);
+  }
+
+  // Prefer the diarized utterances we stored, but fall back to parsing
+  // the notes field so a pasted transcript works too.
+  function getUtterances() {
+    if (currentSession && (currentSession.utterances || []).length) return currentSession.utterances;
+    const notes = document.getElementById('interview-notes');
+    return notes ? Evidence.parseTranscript(notes.value) : [];
+  }
+
+  function pinnedFor(compId) {
+    if (!currentSession || !currentSession.evidence) return [];
+    return currentSession.evidence[compId] || [];
+  }
+
+  // Must mirror the filtering in Renderer.evidenceSlotHTML so that the
+  // rendered positions line up with what we pin.
+  function visibleSuggestions(compId) {
+    const pinned = pinnedFor(compId);
+    return (evidenceSuggestions[compId] || []).filter(sg => !pinned.some(p => p.text === sg.text));
+  }
+
+  function renderSpeakerPicker() {
+    const el = document.getElementById('evidence-speakers');
+    if (!el) return;
+
+    if (evidenceSpeakers.length < 2) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+
+    el.style.display = 'flex';
+    el.innerHTML = `<span class="evidence-speakers-label">${T.get('evidenceSpeakerQ')}</span>` +
+      evidenceSpeakers.map(sp => `
+        <button class="speaker-chip${sp.speaker === candidateSpeaker ? ' speaker-chip-on' : ''}" data-speaker="${escHtml(sp.speaker)}">
+          <span>${escHtml(sp.speaker)}</span>
+          <span class="speaker-share">${Math.round(sp.share * 100)}% ${T.get('evidenceSpeakerHint')}</span>
+        </button>`).join('');
+  }
+
+  function renderEvidenceSlots() {
+    document.querySelectorAll('[data-evidence-for]').forEach(slot => {
+      const compId = slot.dataset.evidenceFor;
+      slot.innerHTML = Renderer.evidenceSlotHTML(
+        compId, pinnedFor(compId), evidenceSuggestions[compId] || []);
+    });
+  }
+
+  function runEvidenceSearch() {
+    const status = document.getElementById('evidence-status');
+    const utterances = getUtterances();
+
+    if (!utterances.length) {
+      evidenceSpeakers = [];
+      evidenceSuggestions = {};
+      renderSpeakerPicker();
+      // Still repaint, so already-pinned quotes survive a re-render
+      renderEvidenceSlots();
+      if (status) {
+        status.className = 'evidence-status evidence-status-hint';
+        status.textContent = T.get('evidenceNoTranscript');
+      }
+      return;
+    }
+
+    evidenceSpeakers = Evidence.speakerStats(utterances);
+    if (!candidateSpeaker || !evidenceSpeakers.some(sp => sp.speaker === candidateSpeaker)) {
+      candidateSpeaker = Evidence.guessCandidate(utterances);
+    }
+    renderSpeakerPicker();
+
+    buildEvidenceIndex();
+    evidenceSuggestions = evidenceIndex
+      ? Evidence.findEvidence(utterances, evidenceIndex, { candidateSpeaker })
+      : {};
+    evidenceSearched = true;
+
+    const passages = Object.values(evidenceSuggestions).reduce((sum, arr) => sum + arr.length, 0);
+    const comps = Object.keys(evidenceSuggestions).length;
+
+    if (status) {
+      status.className = 'evidence-status';
+      status.textContent = passages
+        ? T.get('evidenceSummary').replace('{n}', passages).replace('{m}', comps)
+        : T.get('evidenceSummaryNone');
+    }
+
+    const label = document.getElementById('find-evidence-label');
+    if (label) label.textContent = T.get('evidenceRerun');
+
+    persist({ candidateSpeaker });
+    renderEvidenceSlots();
+  }
+
+  function prepareEvidence(session) {
+    evidenceIndex = null;
+    evidenceSuggestions = {};
+    evidenceSearched = false;
+    evidenceSpeakers = [];
+    candidateSpeaker = session ? (session.candidateSpeaker || null) : null;
+
+    const status = document.getElementById('evidence-status');
+    if (status) { status.textContent = ''; status.className = 'evidence-status'; }
+
+    renderSpeakerPicker();
+    renderEvidenceSlots();
+
+    // A restored session usually already has a transcript — search it
+    // straight away so the pinned quotes have their context back.
+    if (getUtterances().length) runEvidenceSearch();
+  }
+
+  function pinEvidence(compId, position) {
+    const quote = visibleSuggestions(compId)[position];
+    if (!quote || !currentSession) return;
+
+    const evidence = { ...(currentSession.evidence || {}) };
+    evidence[compId] = [...(evidence[compId] || []), {
+      text: quote.text,
+      speaker: quote.speaker,
+      strength: quote.strength,
+      pinnedAt: Date.now(),
+    }];
+
+    persist({ evidence });
+    renderEvidenceSlots();
+  }
+
+  function unpinEvidence(compId, position) {
+    if (!currentSession) return;
+
+    const evidence = { ...(currentSession.evidence || {}) };
+    const list = [...(evidence[compId] || [])];
+    list.splice(position, 1);
+    if (list.length) evidence[compId] = list;
+    else delete evidence[compId];
+
+    persist({ evidence });
+    renderEvidenceSlots();
+  }
+
+  function setupEvidence() {
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#find-evidence-btn')) {
+        runEvidenceSearch();
+        return;
+      }
+
+      const chip = e.target.closest('.speaker-chip');
+      if (chip) {
+        candidateSpeaker = chip.dataset.speaker;
+        runEvidenceSearch();
+        return;
+      }
+
+      const pin = e.target.closest('[data-pin-evidence]');
+      if (pin) {
+        pinEvidence(pin.dataset.pinEvidence, parseInt(pin.dataset.evPos, 10));
+        return;
+      }
+
+      const unpin = e.target.closest('[data-unpin-evidence]');
+      if (unpin) {
+        unpinEvidence(unpin.dataset.unpinEvidence, parseInt(unpin.dataset.evPos, 10));
+        return;
+      }
+
+      const quote = e.target.closest('.ev-quote');
+      if (quote) quote.classList.toggle('ev-expanded');
+    });
+  }
+
+  // Called by transcribe.js once AssemblyAI returns diarized speech.
+  window.RecruitmentOS = window.RecruitmentOS || {};
+  window.RecruitmentOS.onTranscript = function (result) {
+    const utterances = (result && result.utterances) || [];
+    const notes = document.getElementById('interview-notes');
+    persist({ utterances, notes: notes ? notes.value : '' });
+    if (utterances.length) runEvidenceSearch();
+  };
+
+  // ══════════════════════════════════════
+  //  Candidate comparison
+  // ══════════════════════════════════════
+
+  function openCompare() {
+    Store.flush();
+    showFloatingToggle(false);
+    const panel = document.getElementById('floating-scorecard');
+    if (panel) panel.classList.remove('open');
+    const toggle = document.getElementById('scorecard-panel-toggle');
+    if (toggle) toggle.classList.remove('panel-open');
+
+    showPage('compare');
+    Compare.open(currentSession ? currentSession.role : '');
+    window.scrollTo(0, 0);
+  }
+
+  function setupCompare() {
+    Compare.init({
+      onOpenSession(id) {
+        const session = Store.get(id);
+        if (session) restoreSession(session);
+      },
+    });
+
+    ['compare-btn', 'saved-sessions-btn'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.addEventListener('click', openCompare);
+    });
+
+    const back = document.getElementById('cmp-back');
+    if (back) {
+      back.addEventListener('click', () => {
+        if (lastAnalysisData) {
+          showPage('results');
+          showFloatingToggle(true);
+        } else {
+          showPage('landing');
+          updateSavedCount();
+        }
+      });
+    }
+
+    const cmpLogo = document.getElementById('compare-logo-home');
+    if (cmpLogo) {
+      cmpLogo.addEventListener('click', (e) => {
+        e.preventDefault();
+        showPage('landing');
+        updateSavedCount();
+      });
+    }
+  }
+
   // --- Init ---
   setupLangToggles();
   setupLandingPreviews();
@@ -1014,4 +1620,11 @@
   setupNotesExtraction();
   setupFloatingPanel();
   renderLandingLibrary();
+  setupPersistence();
+  setupPackageBar();
+  setupEvidence();
+  setupCompare();
+  setupSessionUi();
+  setupResumeBanner();
+  updateSavedCount();
 })();

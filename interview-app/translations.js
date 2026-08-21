@@ -471,6 +471,131 @@ const T = (() => {
     scorecardPanelBtn: { en: 'Scorecard', sv: 'Bedömning' },
     scorecardPanelTitle: { en: '📊 Quick Scorecard', sv: '📊 Snabbedömning' },
     scorecardPanelClose: { en: 'Close', sv: 'Stäng' },
+
+    // ── Session persistence ──
+    candidateLabel: { en: 'Candidate', sv: 'Kandidat' },
+    candidatePlaceholder: { en: 'Candidate name', sv: 'Kandidatens namn' },
+    unnamedCandidate: { en: 'Unnamed candidate', sv: 'Namnlös kandidat' },
+    savedIndicator: { en: 'Saved', sv: 'Sparat' },
+    storageUnavailable: { en: 'Autosave is off — your browser blocks local storage.', sv: 'Autospar är av — din webbläsare blockerar lokal lagring.' },
+    resumeTitle: { en: 'Continue where you left off?', sv: 'Fortsätt där du slutade?' },
+    resumeDesc: { en: 'Unfinished interview for {role}', sv: 'Påbörjad intervju för {role}' },
+    resumeBtn: { en: 'Continue', sv: 'Fortsätt' },
+    resumeDiscard: { en: 'Start fresh', sv: 'Börja om' },
+    justNow: { en: 'just now', sv: 'nyss' },
+    minutesAgo: { en: '{n} min ago', sv: 'för {n} min sedan' },
+    hoursAgo: { en: '{n} h ago', sv: 'för {n} tim sedan' },
+    daysAgo: { en: '{n} d ago', sv: 'för {n} dagar sedan' },
+
+    // ── Candidate comparison ──
+    compareBtn: { en: 'Compare', sv: 'Jämför' },
+    compareTitle: { en: 'Compare candidates', sv: 'Jämför kandidater' },
+    compareBack: { en: 'Back', sv: 'Tillbaka' },
+    compareRole: { en: 'Role', sv: 'Roll' },
+    compareAllRoles: { en: 'All roles', sv: 'Alla roller' },
+    compareSelectHint: { en: 'Pick the candidates you want side by side.', sv: 'Välj de kandidater du vill se sida vid sida.' },
+    compareEmpty: { en: 'No saved interviews yet. Rate a candidate and it shows up here.', sv: 'Inga sparade intervjuer än. Bedöm en kandidat så dyker den upp här.' },
+    compareNeedOne: { en: 'Select at least one candidate above.', sv: 'Välj minst en kandidat ovan.' },
+    compareCompetency: { en: 'Competency', sv: 'Kompetens' },
+    compareWeightCol: { en: 'Weight', sv: 'Vikt' },
+    compareWeighted: { en: 'Weighted average', sv: 'Viktat snitt' },
+    compareRecommendation: { en: 'Recommendation', sv: 'Rekommendation' },
+    compareScored: { en: 'Rated', sv: 'Bedömda' },
+    compareEvidenceTitle: { en: 'Pinned evidence', sv: 'Fästa bevis' },
+    compareNoEvidence: { en: 'No evidence pinned.', sv: 'Inga bevis fästa.' },
+    compareOpen: { en: 'Open', sv: 'Öppna' },
+    compareDelete: { en: 'Delete', sv: 'Ta bort' },
+    compareDeleteConfirm: { en: 'Delete this saved interview? This cannot be undone.', sv: 'Ta bort den här sparade intervjun? Det går inte att ångra.' },
+    compareExport: { en: 'Export CSV', sv: 'Exportera CSV' },
+    compareNotRated: { en: 'Not rated', sv: 'Ej bedömd' },
+    compareBest: { en: 'Highest score', sv: 'Högsta poäng' },
+    compareMixedRoles: { en: 'These candidates were interviewed for different roles — scores are only comparable within the same competency set.', sv: 'Kandidaterna har intervjuats för olika roller — poängen är bara jämförbara inom samma kompetensuppsättning.' },
+    savedSessions: { en: 'Saved interviews', sv: 'Sparade intervjuer' },
+
+    // ── Evidence extraction ──
+    evidenceTitle: { en: 'Evidence from the interview', sv: 'Bevis från intervjun' },
+    evidenceFind: { en: 'Find evidence in transcript', sv: 'Hitta bevis i transkriptet' },
+    evidenceRerun: { en: 'Search again', sv: 'Sök igen' },
+    evidenceNoTranscript: { en: 'Record the interview, or paste a speaker-labelled transcript into the notes panel, and the evidence search will match passages to each competency.', sv: 'Spela in intervjun, eller klistra in ett transkript med talarmärkning i anteckningspanelen, så matchar bevissökningen avsnitt mot varje kompetens.' },
+    evidenceSpeakerQ: { en: 'Who is the candidate?', sv: 'Vem är kandidaten?' },
+    evidenceSpeakerHint: { en: 'of the talking', sv: 'av taltiden' },
+    evidencePin: { en: 'Pin', sv: 'Fäst' },
+    evidenceUnpin: { en: 'Remove', sv: 'Ta bort' },
+    evidencePinnedLabel: { en: 'Pinned', sv: 'Fäst' },
+    evidenceSuggestions: { en: 'Suggested passages', sv: 'Föreslagna avsnitt' },
+    evidenceSummary: { en: '{n} passages matched across {m} competencies', sv: '{n} avsnitt matchade över {m} kompetenser' },
+    evidenceSummaryNone: { en: 'No passages matched — try selecting a different speaker.', sv: 'Inga avsnitt matchade — pröva att välja en annan talare.' },
+    evidenceDisclaimer: { en: 'Suggestions are keyword matches, not judgements. Read the passage before you rate.', sv: 'Förslagen är nyckelordsmatchningar, inte bedömningar. Läs avsnittet innan du sätter betyg.' },
+    evidenceStrength: {
+      en: { strong: 'Strong match', medium: 'Moderate match', weak: 'Weak match' },
+      sv: { strong: 'Stark träff', medium: 'Måttlig träff', weak: 'Svag träff' },
+    },
+
+    // ── Generated packages ──
+    loadingAiSteps: {
+      en: [
+        'Reading the role description in depth',
+        'Deriving the competencies this role actually needs',
+        'Weighting them against the requirements',
+        'Writing behavioural questions for each competency',
+        'Working out what strong and weak answers look like',
+        'Almost there — assembling your interview kit',
+      ],
+      sv: [
+        'Läser rollbeskrivningen på djupet',
+        'Härleder de kompetenser rollen faktiskt kräver',
+        'Viktar dem mot kraven',
+        'Skriver beteendefrågor för varje kompetens',
+        'Formulerar hur starka och svaga svar ser ut',
+        'Snart klart — sätter ihop ditt intervjupaket',
+      ],
+    },
+    loadingSkip: { en: 'Continue without AI', sv: 'Fortsätt utan AI' },
+
+    packageAi: { en: 'AI-generated', sv: 'AI-genererat' },
+    packageRules: { en: 'Standard package', sv: 'Standardpaket' },
+    packageAiNote: {
+      en: 'Competencies and questions were written for this specific role. Read them before you use them.',
+      sv: 'Kompetenser och frågor är skrivna för just den här rollen. Läs igenom dem innan du använder dem.',
+    },
+    packageRulesNote: {
+      en: 'Competencies and questions come from the built-in template library, not from this role description.',
+      sv: 'Kompetenser och frågor kommer från det inbyggda mallbiblioteket, inte från den här rollbeskrivningen.',
+    },
+    packageGenerate: { en: 'Generate for this role', sv: 'Generera för den här rollen' },
+    packageRetry: { en: 'Try again', sv: 'Försök igen' },
+    packageRegenerateWarning: {
+      en: 'Generating a new package replaces the competencies, so the ratings you have already given will be cleared. Continue?',
+      sv: 'Att generera ett nytt paket ersätter kompetenserna, så betygen du redan satt försvinner. Vill du fortsätta?',
+    },
+    aiNotices: {
+      en: {
+        not_configured: 'AI generation is not configured on the server — showing the standard package.',
+        unauthorized: 'AI generation rejected the request — showing the standard package.',
+        rate_limited: 'Too many generations in a short time. Wait a minute and try again.',
+        refused: 'The model declined to process this role description — showing the standard package.',
+        truncated: 'Generation was cut off before it finished — showing the standard package.',
+        unparseable: 'The generated package could not be read — showing the standard package.',
+        empty: 'Generation returned nothing usable — showing the standard package.',
+        network: 'Could not reach AI generation — showing the standard package.',
+        too_large: 'The role description is too long to generate from.',
+        cancelled: 'Generation skipped — showing the standard package.',
+        generation_failed: 'AI generation failed — showing the standard package.',
+      },
+      sv: {
+        not_configured: 'AI-generering är inte konfigurerad på servern — visar standardpaketet.',
+        unauthorized: 'AI-genereringen avvisade anropet — visar standardpaketet.',
+        rate_limited: 'För många genereringar på kort tid. Vänta en minut och försök igen.',
+        refused: 'Modellen avböjde att bearbeta den här rollbeskrivningen — visar standardpaketet.',
+        truncated: 'Genereringen avbröts innan den blev klar — visar standardpaketet.',
+        unparseable: 'Det genererade paketet gick inte att läsa — visar standardpaketet.',
+        empty: 'Genereringen gav inget användbart — visar standardpaketet.',
+        network: 'Kunde inte nå AI-genereringen — visar standardpaketet.',
+        too_large: 'Rollbeskrivningen är för lång för att generera från.',
+        cancelled: 'Generering överhoppad — visar standardpaketet.',
+        generation_failed: 'AI-genereringen misslyckades — visar standardpaketet.',
+      },
+    },
   };
 
   function get(key) {
@@ -488,5 +613,15 @@ const T = (() => {
     return currentLang;
   }
 
-  return { get, setLang, getLang, strings };
+  // Shared by the resume banner and the comparison view
+  function relativeTime(ts) {
+    const mins = Math.round((Date.now() - ts) / 60000);
+    if (mins < 2) return get('justNow');
+    if (mins < 60) return get('minutesAgo').replace('{n}', mins);
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return get('hoursAgo').replace('{n}', hours);
+    return get('daysAgo').replace('{n}', Math.round(hours / 24));
+  }
+
+  return { get, setLang, getLang, relativeTime, strings };
 })();
