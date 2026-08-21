@@ -177,7 +177,7 @@ async function generatePackage({ apiKey, jd, lang, existing }) {
     system: SYSTEM_PROMPT,
     thinking: { type: 'adaptive' },
     output_config: {
-      effort: 'high',
+      effort: 'medium',
       format: { type: 'json_schema', schema: RESPONSE_SCHEMA },
     },
     // Rescue the request on the fallback model if a safety classifier declines
