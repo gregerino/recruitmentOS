@@ -1,44 +1,34 @@
+// Speaker-diarized transcription via AssemblyAI.
 const https = require('https');
+const { readAudioRequest } = require('./_guards');
+
+// A WebM/Opus recording runs roughly 180 KB per minute, so this covers
+// a long interview while keeping a stray upload out of the function's
+// memory. Note Vercel caps request bodies at 4.5 MB before this is
+// reached — see README.
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+const MAX_REQUESTS_PER_MINUTE = 6;
 
 module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   const apiKey = process.env.ASSEMBLYAI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'ASSEMBLYAI_API_KEY not configured' });
+    return res.status(503).json({ error: 'ASSEMBLYAI_API_KEY not configured', code: 'not_configured' });
   }
 
-  const contentType = req.headers['content-type'] || '';
-  if (!contentType.includes('multipart/form-data')) {
-    return res.status(400).json({ error: 'Expected multipart/form-data' });
-  }
-
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-  const body = Buffer.concat(chunks);
-
-  const boundaryMatch = contentType.match(/boundary=(.+)/);
-  if (!boundaryMatch) {
-    return res.status(400).json({ error: 'Missing boundary' });
-  }
-
-  const parts = parseMultipart(body, boundaryMatch[1]);
-  const filePart = parts.find(p => p.isFile);
-  if (!filePart) {
-    return res.status(400).json({ error: 'No audio file found' });
-  }
+  const request = await readAudioRequest(req, res, {
+    maxBytes: MAX_AUDIO_BYTES,
+    maxRequests: MAX_REQUESTS_PER_MINUTE,
+  });
+  if (!request) return;
 
   try {
-    const uploadUrl = await uploadAudio(apiKey, filePart.data);
+    const uploadUrl = await uploadAudio(apiKey, request.filePart.data);
     const transcriptId = await createTranscript(apiKey, uploadUrl);
     const result = await pollTranscript(apiKey, transcriptId);
     return res.status(200).json(result);
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Transcription failed' });
+    console.error('transcribe-assembly failed:', e && e.message);
+    return res.status(502).json({ error: e.message || 'Transcription failed', code: 'transcription_failed' });
   }
 };
 
@@ -153,34 +143,3 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-function parseMultipart(buf, boundary) {
-  const parts = [];
-  const boundaryBuf = Buffer.from('--' + boundary);
-  let start = buf.indexOf(boundaryBuf) + boundaryBuf.length;
-
-  while (start < buf.length) {
-    const nextBoundary = buf.indexOf(boundaryBuf, start);
-    if (nextBoundary === -1) break;
-
-    const part = buf.slice(start, nextBoundary);
-    const headerEnd = part.indexOf('\r\n\r\n');
-    if (headerEnd === -1) { start = nextBoundary + boundaryBuf.length; continue; }
-
-    const headers = part.slice(0, headerEnd).toString();
-    const body = part.slice(headerEnd + 4, part.length - 2);
-
-    const nameMatch = headers.match(/name="([^"]+)"/);
-    const filenameMatch = headers.match(/filename="([^"]+)"/);
-
-    if (nameMatch) {
-      parts.push({
-        name: nameMatch[1],
-        filename: filenameMatch ? filenameMatch[1] : null,
-        data: body,
-        isFile: !!filenameMatch,
-      });
-    }
-    start = nextBoundary + boundaryBuf.length;
-  }
-  return parts;
-}

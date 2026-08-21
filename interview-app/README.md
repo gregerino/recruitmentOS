@@ -11,6 +11,8 @@ Deployed on Vercel with this directory as the project root.
 | `ASSEMBLYAI_API_KEY` | `api/transcribe-assembly.js` | for transcription | Speaker-diarized transcription of the interview. |
 | `OPENAI_API_KEY` | `api/transcribe.js` | optional | Older Whisper transcription path, kept as a fallback. |
 | `GENERATE_ACCESS_TOKEN` | `api/generate.js` | optional | When set, `/api/generate` requires a matching `x-ros-token` header. |
+| `TRANSCRIBE_ACCESS_TOKEN` | both transcription endpoints | optional | Same, for `/api/transcribe` and `/api/transcribe-assembly`. |
+| `API_ACCESS_TOKEN` | all endpoints | optional | Locks every endpoint at once; takes precedence over the two above. |
 
 ## Endpoints
 
@@ -23,6 +25,24 @@ Deployed on Vercel with this directory as the project root.
   Capped at 30 000 characters and 12 requests per minute per IP.
 - `POST /api/transcribe-assembly` — multipart audio → diarized transcript.
 - `POST /api/transcribe` — multipart audio → plain transcript (Whisper).
+
+Both audio endpoints cap the upload at 10 MB and allow 6 requests per minute per IP.
+
+## Request guards
+
+`api/_guards.js` holds what every endpoint does before spending money: method check,
+optional access token, per-IP rate limit, and a capped body read. The cap matters most —
+without one a single large POST is read straight into the function's memory.
+
+None of this is authentication. These are public endpoints on a public domain, so the
+rate limit is a speed bump against a stray script, not a lock. Rate-limit state lives in
+one serverless instance's memory, so it caps a single caller's burst rather than global
+usage. Set an access token to actually close them.
+
+Note that Vercel rejects request bodies over 4.5 MB before the handler sees them, so the
+10 MB cap is a memory guard rather than the effective ceiling — roughly 25 minutes of
+WebM/Opus audio gets through. A longer recording needs a different upload path
+(browser straight to the provider), not a bigger cap here.
 
 ## How the package is built
 

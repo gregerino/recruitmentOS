@@ -14,18 +14,13 @@
 //  returns an error the UI reports while keeping the local result.
 // ══════════════════════════════════════════════════════════════
 const Anthropic = require('@anthropic-ai/sdk').default;
+const { rejected, readJsonBody } = require('./_guards');
 
 const MODEL = 'claude-opus-5';
 const MAX_JD_CHARS = 30000;
 const MIN_JD_CHARS = 50;
 const MAX_BODY_BYTES = 200 * 1024;
-
-// Per-instance rate limit. Serverless instances are not shared, so this
-// caps a single caller's burst rather than global usage — a speed bump,
-// not authentication. Set GENERATE_ACCESS_TOKEN to actually lock it down.
-const RATE_WINDOW_MS = 60 * 1000;
-const RATE_MAX_REQUESTS = 12;
-const recentCalls = new Map();
+const MAX_REQUESTS_PER_MINUTE = 12;
 
 const CATEGORIES = ['technical', 'behavioral', 'leadership', 'communication', 'problemSolving'];
 const WEIGHTS = ['critical', 'high', 'medium'];
@@ -128,29 +123,22 @@ The competency framework for this role has already been settled and is given to 
 - followups: 2-3 probes that push for specifics.`;
 
 module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return res.status(503).json({ error: 'ANTHROPIC_API_KEY not configured', code: 'not_configured' });
   }
 
-  const requiredToken = process.env.GENERATE_ACCESS_TOKEN;
-  if (requiredToken && req.headers['x-ros-token'] !== requiredToken) {
-    return res.status(401).json({ error: 'Unauthorized', code: 'unauthorized' });
-  }
-
-  if (isRateLimited(req)) {
-    return res.status(429).json({ error: 'Too many requests, try again in a minute', code: 'rate_limited' });
-  }
+  if (rejected(req, res, {
+    maxRequests: MAX_REQUESTS_PER_MINUTE,
+    tokenEnv: 'GENERATE_ACCESS_TOKEN',
+  })) return;
 
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, MAX_BODY_BYTES);
   } catch (e) {
-    return res.status(400).json({ error: e.message, code: 'bad_request' });
+    const tooLarge = e.code === 'too_large';
+    return res.status(tooLarge ? 413 : 400).json({ error: e.message, code: e.code || 'bad_request' });
   }
 
   const jd = typeof body.jd === 'string' ? body.jd.trim() : '';
@@ -364,50 +352,4 @@ function slugify(value) {
     .slice(0, 60);
 }
 
-function isRateLimited(req) {
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
-  const now = Date.now();
-  const calls = (recentCalls.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
 
-  if (calls.length >= RATE_MAX_REQUESTS) {
-    recentCalls.set(ip, calls);
-    return true;
-  }
-
-  calls.push(now);
-  recentCalls.set(ip, calls);
-
-  // Keep the map from growing without bound on a long-lived instance
-  if (recentCalls.size > 500) {
-    for (const [key, times] of recentCalls) {
-      if (!times.some(t => now - t < RATE_WINDOW_MS)) recentCalls.delete(key);
-    }
-  }
-  return false;
-}
-
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    const chunks = [];
-
-    req.on('data', chunk => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on('error', reject);
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
-      } catch (e) {
-        reject(new Error('Invalid JSON body'));
-      }
-    });
-  });
-}
